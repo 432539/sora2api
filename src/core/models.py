@@ -33,6 +33,9 @@ class Token(BaseModel):
     # 功能开关
     image_enabled: bool = True  # 是否启用图片生成
     video_enabled: bool = True  # 是否启用视频生成
+    # 并发限制
+    image_concurrency: int = -1  # 图片并发数限制，-1表示不限制
+    video_concurrency: int = -1  # 视频并发数限制，-1表示不限制
 
 class TokenStats(BaseModel):
     """Token statistics"""

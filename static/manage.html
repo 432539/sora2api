@@ -100,6 +100,22 @@
                                 <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
                             </svg>
                         </button>
+                        <button onclick="exportTokens()" class="inline-flex items-center justify-center rounded-md bg-blue-600 text-white hover:bg-blue-700 h-8 px-3" title="导出所有Token">
+                            <svg class="h-4 w-4 mr-2" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                                <polyline points="7 10 12 15 17 10"/>
+                                <line x1="12" y1="15" x2="12" y2="3"/>
+                            </svg>
+                            <span class="text-sm font-medium">导出</span>
+                        </button>
+                        <button onclick="openImportModal()" class="inline-flex items-center justify-center rounded-md bg-green-600 text-white hover:bg-green-700 h-8 px-3" title="导入Token">
+                            <svg class="h-4 w-4 mr-2" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                                <polyline points="17 8 12 3 7 8"/>
+                                <line x1="12" y1="3" x2="12" y2="15"/>
+                            </svg>
+                            <span class="text-sm font-medium">导入</span>
+                        </button>
                         <button onclick="openAddModal()" class="inline-flex items-center justify-center rounded-md bg-primary text-primary-foreground hover:bg-primary/90 h-8 px-3">
                             <svg class="h-4 w-4 mr-2" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <line x1="12" y1="5" x2="12" y2="19"/>
@@ -414,16 +430,22 @@
                 <div class="space-y-3 pt-2 border-t border-border">
                     <label class="text-sm font-medium">功能开关</label>
                     <div class="space-y-2">
-                        <label class="inline-flex items-center gap-2 cursor-pointer">
-                            <input type="checkbox" id="addTokenImageEnabled" checked class="h-4 w-4 rounded border-input">
-                            <span class="text-sm font-medium">启用图片生成</span>
-                        </label>
+                        <div class="flex items-center gap-3">
+                            <label class="inline-flex items-center gap-2 cursor-pointer">
+                                <input type="checkbox" id="addTokenImageEnabled" checked class="h-4 w-4 rounded border-input">
+                                <span class="text-sm font-medium">启用图片生成</span>
+                            </label>
+                            <input type="number" id="addTokenImageConcurrency" value="-1" class="flex h-8 w-20 rounded-md border border-input bg-background px-2 py-1 text-sm" placeholder="并发数" title="并发数量限制：设置同时处理的最大请求数。-1表示不限制">
+                        </div>
                     </div>
                     <div class="space-y-2">
-                        <label class="inline-flex items-center gap-2 cursor-pointer">
-                            <input type="checkbox" id="addTokenVideoEnabled" checked class="h-4 w-4 rounded border-input">
-                            <span class="text-sm font-medium">启用视频生成</span>
-                        </label>
+                        <div class="flex items-center gap-3">
+                            <label class="inline-flex items-center gap-2 cursor-pointer">
+                                <input type="checkbox" id="addTokenVideoEnabled" checked class="h-4 w-4 rounded border-input">
+                                <span class="text-sm font-medium">启用视频生成</span>
+                            </label>
+                            <input type="number" id="addTokenVideoConcurrency" value="-1" class="flex h-8 w-20 rounded-md border border-input bg-background px-2 py-1 text-sm" placeholder="并发数" title="并发数量限制：设置同时处理的最大请求数。-1表示不限制">
+                        </div>
                     </div>
                 </div>
             </div>
@@ -497,16 +519,22 @@
                 <div class="space-y-3 pt-2 border-t border-border">
                     <label class="text-sm font-medium">功能开关</label>
                     <div class="space-y-2">
-                        <label class="inline-flex items-center gap-2 cursor-pointer">
-                            <input type="checkbox" id="editTokenImageEnabled" class="h-4 w-4 rounded border-input">
-                            <span class="text-sm font-medium">启用图片生成</span>
-                        </label>
+                        <div class="flex items-center gap-3">
+                            <label class="inline-flex items-center gap-2 cursor-pointer">
+                                <input type="checkbox" id="editTokenImageEnabled" class="h-4 w-4 rounded border-input">
+                                <span class="text-sm font-medium">启用图片生成</span>
+                            </label>
+                            <input type="number" id="editTokenImageConcurrency" class="flex h-8 w-20 rounded-md border border-input bg-background px-2 py-1 text-sm" placeholder="并发数" title="并发数量限制：设置同时处理的最大请求数。-1表示不限制">
+                        </div>
                     </div>
                     <div class="space-y-2">
-                        <label class="inline-flex items-center gap-2 cursor-pointer">
-                            <input type="checkbox" id="editTokenVideoEnabled" class="h-4 w-4 rounded border-input">
-                            <span class="text-sm font-medium">启用视频生成</span>
-                        </label>
+                        <div class="flex items-center gap-3">
+                            <label class="inline-flex items-center gap-2 cursor-pointer">
+                                <input type="checkbox" id="editTokenVideoEnabled" class="h-4 w-4 rounded border-input">
+                                <span class="text-sm font-medium">启用视频生成</span>
+                            </label>
+                            <input type="number" id="editTokenVideoConcurrency" class="flex h-8 w-20 rounded-md border border-input bg-background px-2 py-1 text-sm" placeholder="并发数" title="并发数量限制：设置同时处理的最大请求数。-1表示不限制">
+                        </div>
                     </div>
                 </div>
             </div>
@@ -556,6 +584,43 @@
         </div>
     </div>
 
+    <!-- Token 导入模态框 -->
+    <div id="importModal" class="hidden fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
+        <div class="bg-background rounded-lg border border-border w-full max-w-md shadow-xl">
+            <div class="flex items-center justify-between p-5 border-b border-border">
+                <h3 class="text-lg font-semibold">导入 Token</h3>
+                <button onclick="closeImportModal()" class="text-muted-foreground hover:text-foreground">
+                    <svg class="h-3.5 w-3.5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18"/>
+                        <line x1="6" y1="6" x2="18" y2="18"/>
+                    </svg>
+                </button>
+            </div>
+            <div class="p-5 space-y-4">
+                <div>
+                    <label class="text-sm font-medium mb-2 block">选择 JSON 文件</label>
+                    <input type="file" id="importFile" accept=".json" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
+                    <p class="text-xs text-muted-foreground mt-1">选择导出的 Token JSON 文件进行导入</p>
+                </div>
+                <div class="rounded-md bg-blue-50 dark:bg-blue-900/20 p-3 border border-blue-200 dark:border-blue-800">
+                    <p class="text-xs text-blue-800 dark:text-blue-200">
+                        <strong>说明：</strong>如果邮箱存在则会覆盖更新，不存在则会新增
+                    </p>
+                </div>
+            </div>
+            <div class="flex items-center justify-end gap-3 p-5 border-t border-border">
+                <button onclick="closeImportModal()" class="inline-flex items-center justify-center rounded-md border border-input bg-background hover:bg-accent h-9 px-5">取消</button>
+                <button id="importBtn" onclick="submitImportTokens()" class="inline-flex items-center justify-center rounded-md bg-primary text-primary-foreground hover:bg-primary/90 h-9 px-5">
+                    <span id="importBtnText">导入</span>
+                    <svg id="importBtnSpinner" class="hidden animate-spin h-4 w-4 ml-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                </button>
+            </div>
+        </div>
+    </div>
+
     <script>
         let allTokens=[];
         const $=(id)=>document.getElementById(id),
@@ -571,15 +636,15 @@
         renderTokens=()=>{const tb=$('tokenTableBody');tb.innerHTML=allTokens.map(t=>{const imageDisplay=t.image_enabled?`${t.image_count||0}`:'-';const videoDisplay=(t.video_enabled&&t.sora2_supported)?`${t.video_count||0}`:'-';return`<tr><td class="py-2.5 px-3">${t.email}</td><td class="py-2.5 px-3"><span class="inline-flex items-center rounded px-2 py-0.5 text-xs ${t.is_active?'bg-green-50 text-green-700':'bg-gray-100 text-gray-700'}">${t.is_active?'活跃':'禁用'}</span></td><td class="py-2.5 px-3 text-xs">${formatExpiry(t.expiry_time)}</td><td class="py-2.5 px-3 text-xs">${formatPlanTypeWithTooltip(t)}</td><td class="py-2.5 px-3 text-xs">${formatSora2(t)}</td><td class="py-2.5 px-3">${formatSora2Remaining(t)}</td><td class="py-2.5 px-3">${imageDisplay}</td><td class="py-2.5 px-3">${videoDisplay}</td><td class="py-2.5 px-3">${t.error_count||0}</td><td class="py-2.5 px-3 text-xs text-muted-foreground">${t.remark||'-'}</td><td class="py-2.5 px-3 text-right"><button onclick="testToken(${t.id})" class="inline-flex items-center justify-center rounded-md hover:bg-blue-50 hover:text-blue-700 h-7 px-2 text-xs mr-1">测试</button><button onclick="openEditModal(${t.id})" class="inline-flex items-center justify-center rounded-md hover:bg-green-50 hover:text-green-700 h-7 px-2 text-xs mr-1">编辑</button><button onclick="toggleToken(${t.id},${t.is_active})" class="inline-flex items-center justify-center rounded-md hover:bg-accent h-7 px-2 text-xs mr-1">${t.is_active?'禁用':'启用'}</button><button onclick="deleteToken(${t.id})" class="inline-flex items-center justify-center rounded-md hover:bg-destructive/10 hover:text-destructive h-7 px-2 text-xs">删除</button></td></tr>`}).join('')},
         refreshTokens=async()=>{await loadTokens();await loadStats()},
         openAddModal=()=>$('addModal').classList.remove('hidden'),
-        closeAddModal=()=>{$('addModal').classList.add('hidden');$('addTokenAT').value='';$('addTokenST').value='';$('addTokenRT').value='';$('addTokenRemark').value='';$('addTokenImageEnabled').checked=true;$('addTokenVideoEnabled').checked=true;$('addRTRefreshHint').classList.add('hidden')},
-        openEditModal=(id)=>{const token=allTokens.find(t=>t.id===id);if(!token)return showToast('Token不存在','error');$('editTokenId').value=token.id;$('editTokenAT').value=token.token||'';$('editTokenST').value=token.st||'';$('editTokenRT').value=token.rt||'';$('editTokenRemark').value=token.remark||'';$('editTokenImageEnabled').checked=token.image_enabled!==false;$('editTokenVideoEnabled').checked=token.video_enabled!==false;$('editModal').classList.remove('hidden')},
-        closeEditModal=()=>{$('editModal').classList.add('hidden');$('editTokenId').value='';$('editTokenAT').value='';$('editTokenST').value='';$('editTokenRT').value='';$('editTokenRemark').value='';$('editTokenImageEnabled').checked=true;$('editTokenVideoEnabled').checked=true;$('editRTRefreshHint').classList.add('hidden')},
-        submitEditToken=async()=>{const id=parseInt($('editTokenId').value),at=$('editTokenAT').value.trim(),st=$('editTokenST').value.trim(),rt=$('editTokenRT').value.trim(),remark=$('editTokenRemark').value.trim(),imageEnabled=$('editTokenImageEnabled').checked,videoEnabled=$('editTokenVideoEnabled').checked;if(!id)return showToast('Token ID无效','error');if(!at)return showToast('请输入 Access Token','error');const btn=$('editTokenBtn'),btnText=$('editTokenBtnText'),btnSpinner=$('editTokenBtnSpinner');btn.disabled=true;btnText.textContent='保存中...';btnSpinner.classList.remove('hidden');try{const r=await apiRequest(`/api/tokens/${id}`,{method:'PUT',body:JSON.stringify({token:at,st:st||null,rt:rt||null,remark:remark||null,image_enabled:imageEnabled,video_enabled:videoEnabled})});if(!r){btn.disabled=false;btnText.textContent='保存';btnSpinner.classList.add('hidden');return}const d=await r.json();if(d.success){closeEditModal();await refreshTokens();showToast('Token更新成功','success')}else{showToast('更新失败: '+(d.detail||d.message||'未知错误'),'error')}}catch(e){showToast('更新失败: '+e.message,'error')}finally{btn.disabled=false;btnText.textContent='保存';btnSpinner.classList.add('hidden')}},
+        closeAddModal=()=>{$('addModal').classList.add('hidden');$('addTokenAT').value='';$('addTokenST').value='';$('addTokenRT').value='';$('addTokenRemark').value='';$('addTokenImageEnabled').checked=true;$('addTokenVideoEnabled').checked=true;$('addTokenImageConcurrency').value='-1';$('addTokenVideoConcurrency').value='-1';$('addRTRefreshHint').classList.add('hidden')},
+        openEditModal=(id)=>{const token=allTokens.find(t=>t.id===id);if(!token)return showToast('Token不存在','error');$('editTokenId').value=token.id;$('editTokenAT').value=token.token||'';$('editTokenST').value=token.st||'';$('editTokenRT').value=token.rt||'';$('editTokenRemark').value=token.remark||'';$('editTokenImageEnabled').checked=token.image_enabled!==false;$('editTokenVideoEnabled').checked=token.video_enabled!==false;$('editTokenImageConcurrency').value=token.image_concurrency||'-1';$('editTokenVideoConcurrency').value=token.video_concurrency||'-1';$('editModal').classList.remove('hidden')},
+        closeEditModal=()=>{$('editModal').classList.add('hidden');$('editTokenId').value='';$('editTokenAT').value='';$('editTokenST').value='';$('editTokenRT').value='';$('editTokenRemark').value='';$('editTokenImageEnabled').checked=true;$('editTokenVideoEnabled').checked=true;$('editTokenImageConcurrency').value='';$('editTokenVideoConcurrency').value='';$('editRTRefreshHint').classList.add('hidden')},
+        submitEditToken=async()=>{const id=parseInt($('editTokenId').value),at=$('editTokenAT').value.trim(),st=$('editTokenST').value.trim(),rt=$('editTokenRT').value.trim(),remark=$('editTokenRemark').value.trim(),imageEnabled=$('editTokenImageEnabled').checked,videoEnabled=$('editTokenVideoEnabled').checked,imageConcurrency=$('editTokenImageConcurrency').value?parseInt($('editTokenImageConcurrency').value):null,videoConcurrency=$('editTokenVideoConcurrency').value?parseInt($('editTokenVideoConcurrency').value):null;if(!id)return showToast('Token ID无效','error');if(!at)return showToast('请输入 Access Token','error');const btn=$('editTokenBtn'),btnText=$('editTokenBtnText'),btnSpinner=$('editTokenBtnSpinner');btn.disabled=true;btnText.textContent='保存中...';btnSpinner.classList.remove('hidden');try{const r=await apiRequest(`/api/tokens/${id}`,{method:'PUT',body:JSON.stringify({token:at,st:st||null,rt:rt||null,remark:remark||null,image_enabled:imageEnabled,video_enabled:videoEnabled,image_concurrency:imageConcurrency,video_concurrency:videoConcurrency})});if(!r){btn.disabled=false;btnText.textContent='保存';btnSpinner.classList.add('hidden');return}const d=await r.json();if(d.success){closeEditModal();await refreshTokens();showToast('Token更新成功','success')}else{showToast('更新失败: '+(d.detail||d.message||'未知错误'),'error')}}catch(e){showToast('更新失败: '+e.message,'error')}finally{btn.disabled=false;btnText.textContent='保存';btnSpinner.classList.add('hidden')}},
         convertST2AT=async()=>{const st=$('addTokenST').value.trim();if(!st)return showToast('请先输入 Session Token','error');try{showToast('正在转换 ST→AT...','info');const r=await apiRequest('/api/tokens/st2at',{method:'POST',body:JSON.stringify({st:st})});if(!r)return;const d=await r.json();if(d.success&&d.access_token){$('addTokenAT').value=d.access_token;showToast('转换成功！AT已自动填入','success')}else{showToast('转换失败: '+(d.message||d.detail||'未知错误'),'error')}}catch(e){showToast('转换失败: '+e.message,'error')}},
         convertRT2AT=async()=>{const rt=$('addTokenRT').value.trim();if(!rt)return showToast('请先输入 Refresh Token','error');const hint=$('addRTRefreshHint');hint.classList.add('hidden');try{showToast('正在转换 RT→AT...','info');const r=await apiRequest('/api/tokens/rt2at',{method:'POST',body:JSON.stringify({rt:rt})});if(!r)return;const d=await r.json();if(d.success&&d.access_token){$('addTokenAT').value=d.access_token;if(d.refresh_token){$('addTokenRT').value=d.refresh_token;hint.classList.remove('hidden');showToast('转换成功！AT已自动填入，RT已被刷新并更新','success')}else{showToast('转换成功！AT已自动填入','success')}}else{showToast('转换失败: '+(d.message||d.detail||'未知错误'),'error')}}catch(e){showToast('转换失败: '+e.message,'error')}},
         convertEditST2AT=async()=>{const st=$('editTokenST').value.trim();if(!st)return showToast('请先输入 Session Token','error');try{showToast('正在转换 ST→AT...','info');const r=await apiRequest('/api/tokens/st2at',{method:'POST',body:JSON.stringify({st:st})});if(!r)return;const d=await r.json();if(d.success&&d.access_token){$('editTokenAT').value=d.access_token;showToast('转换成功！AT已自动填入','success')}else{showToast('转换失败: '+(d.message||d.detail||'未知错误'),'error')}}catch(e){showToast('转换失败: '+e.message,'error')}},
         convertEditRT2AT=async()=>{const rt=$('editTokenRT').value.trim();if(!rt)return showToast('请先输入 Refresh Token','error');const hint=$('editRTRefreshHint');hint.classList.add('hidden');try{showToast('正在转换 RT→AT...','info');const r=await apiRequest('/api/tokens/rt2at',{method:'POST',body:JSON.stringify({rt:rt})});if(!r)return;const d=await r.json();if(d.success&&d.access_token){$('editTokenAT').value=d.access_token;if(d.refresh_token){$('editTokenRT').value=d.refresh_token;hint.classList.remove('hidden');showToast('转换成功！AT已自动填入，RT已被刷新并更新','success')}else{showToast('转换成功！AT已自动填入','success')}}else{showToast('转换失败: '+(d.message||d.detail||'未知错误'),'error')}}catch(e){showToast('转换失败: '+e.message,'error')}},
-        submitAddToken=async()=>{const at=$('addTokenAT').value.trim(),st=$('addTokenST').value.trim(),rt=$('addTokenRT').value.trim(),remark=$('addTokenRemark').value.trim(),imageEnabled=$('addTokenImageEnabled').checked,videoEnabled=$('addTokenVideoEnabled').checked;if(!at)return showToast('请输入 Access Token 或使用 ST/RT 转换','error');const btn=$('addTokenBtn'),btnText=$('addTokenBtnText'),btnSpinner=$('addTokenBtnSpinner');btn.disabled=true;btnText.textContent='添加中...';btnSpinner.classList.remove('hidden');try{const r=await apiRequest('/api/tokens',{method:'POST',body:JSON.stringify({token:at,st:st||null,rt:rt||null,remark:remark||null,image_enabled:imageEnabled,video_enabled:videoEnabled})});if(!r){btn.disabled=false;btnText.textContent='添加';btnSpinner.classList.add('hidden');return}if(r.status===409){const d=await r.json();const msg=d.detail||'Token 已存在';btn.disabled=false;btnText.textContent='添加';btnSpinner.classList.add('hidden');if(confirm(msg+'\n\n是否删除旧 Token 后重新添加？')){const existingToken=allTokens.find(t=>t.token===at);if(existingToken){const deleted=await deleteToken(existingToken.id,true);if(deleted){showToast('正在重新添加...','info');setTimeout(()=>submitAddToken(),500)}else{showToast('删除旧 Token 失败','error')}}}return}const d=await r.json();if(d.success){closeAddModal();await refreshTokens();showToast('Token添加成功','success')}else{showToast('添加失败: '+(d.detail||d.message||'未知错误'),'error')}}catch(e){showToast('添加失败: '+e.message,'error')}finally{btn.disabled=false;btnText.textContent='添加';btnSpinner.classList.add('hidden')}},
+        submitAddToken=async()=>{const at=$('addTokenAT').value.trim(),st=$('addTokenST').value.trim(),rt=$('addTokenRT').value.trim(),remark=$('addTokenRemark').value.trim(),imageEnabled=$('addTokenImageEnabled').checked,videoEnabled=$('addTokenVideoEnabled').checked,imageConcurrency=parseInt($('addTokenImageConcurrency').value)||(-1),videoConcurrency=parseInt($('addTokenVideoConcurrency').value)||(-1);if(!at)return showToast('请输入 Access Token 或使用 ST/RT 转换','error');const btn=$('addTokenBtn'),btnText=$('addTokenBtnText'),btnSpinner=$('addTokenBtnSpinner');btn.disabled=true;btnText.textContent='添加中...';btnSpinner.classList.remove('hidden');try{const r=await apiRequest('/api/tokens',{method:'POST',body:JSON.stringify({token:at,st:st||null,rt:rt||null,remark:remark||null,image_enabled:imageEnabled,video_enabled:videoEnabled,image_concurrency:imageConcurrency,video_concurrency:videoConcurrency})});if(!r){btn.disabled=false;btnText.textContent='添加';btnSpinner.classList.add('hidden');return}if(r.status===409){const d=await r.json();const msg=d.detail||'Token 已存在';btn.disabled=false;btnText.textContent='添加';btnSpinner.classList.add('hidden');if(confirm(msg+'\n\n是否删除旧 Token 后重新添加？')){const existingToken=allTokens.find(t=>t.token===at);if(existingToken){const deleted=await deleteToken(existingToken.id,true);if(deleted){showToast('正在重新添加...','info');setTimeout(()=>submitAddToken(),500)}else{showToast('删除旧 Token 失败','error')}}}return}const d=await r.json();if(d.success){closeAddModal();await refreshTokens();showToast('Token添加成功','success')}else{showToast('添加失败: '+(d.detail||d.message||'未知错误'),'error')}}catch(e){showToast('添加失败: '+e.message,'error')}finally{btn.disabled=false;btnText.textContent='添加';btnSpinner.classList.add('hidden')}},
         testToken=async(id)=>{try{showToast('正在测试Token...','info');const r=await apiRequest(`/api/tokens/${id}/test`,{method:'POST'});if(!r)return;const d=await r.json();if(d.success&&d.status==='success'){let msg=`Token有效！用户: ${d.email||'未知'}`;if(d.sora2_supported){const remaining=d.sora2_total_count-d.sora2_redeemed_count;msg+=`\nSora2: 支持 (${remaining}/${d.sora2_total_count})`;if(d.sora2_remaining_count!==undefined){msg+=`\n可用次数: ${d.sora2_remaining_count}`}}showToast(msg,'success');await refreshTokens()}else{showToast(`Token无效: ${d.message||'未知错误'}`,'error')}}catch(e){showToast('测试失败: '+e.message,'error')}},
         toggleToken=async(id,isActive)=>{const action=isActive?'disable':'enable';try{const r=await apiRequest(`/api/tokens/${id}/${action}`,{method:'POST'});if(!r)return;const d=await r.json();d.success?(await refreshTokens(),showToast(isActive?'Token已禁用':'Token已启用','success')):showToast('操作失败','error')}catch(e){showToast('操作失败: '+e.message,'error')}},
         toggleTokenStatus=async(id,active)=>{try{const r=await apiRequest(`/api/tokens/${id}/status`,{method:'PUT',body:JSON.stringify({is_active:active})});if(!r)return;const d=await r.json();d.success?(await refreshTokens(),showToast('状态更新成功','success')):showToast('更新失败','error')}catch(e){showToast('更新失败: '+e.message,'error')}},
@@ -587,6 +652,10 @@
         copySora2Code=async(code)=>{if(!code){showToast('没有可复制的邀请码','error');return}try{if(navigator.clipboard&&navigator.clipboard.writeText){await navigator.clipboard.writeText(code);showToast(`邀请码已复制: ${code}`,'success')}else{const textarea=document.createElement('textarea');textarea.value=code;textarea.style.position='fixed';textarea.style.opacity='0';document.body.appendChild(textarea);textarea.select();const success=document.execCommand('copy');document.body.removeChild(textarea);if(success){showToast(`邀请码已复制: ${code}`,'success')}else{showToast('复制失败: 浏览器不支持','error')}}}catch(e){showToast('复制失败: '+e.message,'error')}},
         openSora2Modal=(id)=>{$('sora2TokenId').value=id;$('sora2InviteCode').value='';$('sora2Modal').classList.remove('hidden')},
         closeSora2Modal=()=>{$('sora2Modal').classList.add('hidden');$('sora2TokenId').value='';$('sora2InviteCode').value=''},
+        openImportModal=()=>{$('importModal').classList.remove('hidden');$('importFile').value=''},
+        closeImportModal=()=>{$('importModal').classList.add('hidden');$('importFile').value=''},
+        exportTokens=()=>{if(allTokens.length===0){showToast('没有Token可导出','error');return}const exportData=allTokens.map(t=>({email:t.email,access_token:t.token,session_token:t.st||null,refresh_token:t.rt||null,is_active:t.is_active,image_enabled:t.image_enabled!==false,video_enabled:t.video_enabled!==false,image_concurrency:t.image_concurrency||(-1),video_concurrency:t.video_concurrency||(-1)}));const dataStr=JSON.stringify(exportData,null,2);const dataBlob=new Blob([dataStr],{type:'application/json'});const url=URL.createObjectURL(dataBlob);const link=document.createElement('a');link.href=url;link.download=`tokens_${new Date().toISOString().split('T')[0]}.json`;document.body.appendChild(link);link.click();document.body.removeChild(link);URL.revokeObjectURL(url);showToast(`已导出 ${allTokens.length} 个Token`,'success')},
+        submitImportTokens=async()=>{const fileInput=$('importFile');if(!fileInput.files||fileInput.files.length===0){showToast('请选择文件','error');return}const file=fileInput.files[0];if(!file.name.endsWith('.json')){showToast('请选择JSON文件','error');return}try{const fileContent=await file.text();const importData=JSON.parse(fileContent);if(!Array.isArray(importData)){showToast('JSON格式错误：应为数组','error');return}if(importData.length===0){showToast('JSON文件为空','error');return}const btn=$('importBtn'),btnText=$('importBtnText'),btnSpinner=$('importBtnSpinner');btn.disabled=true;btnText.textContent='导入中...';btnSpinner.classList.remove('hidden');try{const r=await apiRequest('/api/tokens/import',{method:'POST',body:JSON.stringify({tokens:importData})});if(!r){btn.disabled=false;btnText.textContent='导入';btnSpinner.classList.add('hidden');return}const d=await r.json();if(d.success){closeImportModal();await refreshTokens();const msg=`导入成功！新增: ${d.added||0}, 更新: ${d.updated||0}`;showToast(msg,'success')}else{showToast('导入失败: '+(d.detail||d.message||'未知错误'),'error')}}catch(e){showToast('导入失败: '+e.message,'error')}finally{btn.disabled=false;btnText.textContent='导入';btnSpinner.classList.add('hidden')}}catch(e){showToast('文件解析失败: '+e.message,'error')}},
         submitSora2Activate=async()=>{const tokenId=parseInt($('sora2TokenId').value),inviteCode=$('sora2InviteCode').value.trim();if(!tokenId)return showToast('Token ID无效','error');if(!inviteCode)return showToast('请输入邀请码','error');if(inviteCode.length!==6)return showToast('邀请码必须是6位','error');const btn=$('sora2ActivateBtn'),btnText=$('sora2ActivateBtnText'),btnSpinner=$('sora2ActivateBtnSpinner');btn.disabled=true;btnText.textContent='激活中...';btnSpinner.classList.remove('hidden');try{showToast('正在激活Sora2...','info');const r=await apiRequest(`/api/tokens/${tokenId}/sora2/activate?invite_code=${inviteCode}`,{method:'POST'});if(!r){btn.disabled=false;btnText.textContent='激活';btnSpinner.classList.add('hidden');return}const d=await r.json();if(d.success){closeSora2Modal();await refreshTokens();if(d.already_accepted){showToast('Sora2已激活（之前已接受）','success')}else{showToast(`Sora2激活成功！邀请码: ${d.invite_code||'无'}`,'success')}}else{showToast('激活失败: '+(d.message||'未知错误'),'error')}}catch(e){showToast('激活失败: '+e.message,'error')}finally{btn.disabled=false;btnText.textContent='激活';btnSpinner.classList.add('hidden')}},
         loadAdminConfig=async()=>{try{const r=await apiRequest('/api/admin/config');if(!r)return;const d=await r.json();$('cfgErrorBan').value=d.error_ban_threshold||3;$('cfgAdminUsername').value=d.admin_username||'admin';$('cfgCurrentAPIKey').value=d.api_key||'';$('cfgDebugEnabled').checked=d.debug_enabled||false}catch(e){console.error('加载配置失败:',e)}},
         saveAdminConfig=async()=>{try{const r=await apiRequest('/api/admin/config',{method:'POST',body:JSON.stringify({error_ban_threshold:parseInt($('cfgErrorBan').value)||3})});if(!r)return;const d=await r.json();d.success?showToast('配置保存成功','success'):showToast('保存失败','error')}catch(e){showToast('保存失败: '+e.message,'error')}},

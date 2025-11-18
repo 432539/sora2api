@@ -192,6 +192,8 @@ class Database:
                     ("sora2_cooldown_until", "TIMESTAMP"),
                     ("image_enabled", "BOOLEAN DEFAULT 1"),
                     ("video_enabled", "BOOLEAN DEFAULT 1"),
+                    ("image_concurrency", "INTEGER DEFAULT -1"),
+                    ("video_concurrency", "INTEGER DEFAULT -1"),
                 ]
 
                 for col_name, col_type in columns_to_add:
@@ -270,7 +272,9 @@ class Database:
                     sora2_remaining_count INTEGER DEFAULT 0,
                     sora2_cooldown_until TIMESTAMP,
                     image_enabled BOOLEAN DEFAULT 1,
-                    video_enabled BOOLEAN DEFAULT 1
+                    video_enabled BOOLEAN DEFAULT 1,
+                    image_concurrency INTEGER DEFAULT -1,
+                    video_concurrency INTEGER DEFAULT -1
                 )
             """)
 
@@ -545,15 +549,16 @@ class Database:
                 INSERT INTO tokens (token, email, username, name, st, rt, remark, expiry_time, is_active,
                                    plan_type, plan_title, subscription_end, sora2_supported, sora2_invite_code,
                                    sora2_redeemed_count, sora2_total_count, sora2_remaining_count, sora2_cooldown_until,
-                                   image_enabled, video_enabled)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                   image_enabled, video_enabled, image_concurrency, video_concurrency)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (token.token, token.email, "", token.name, token.st, token.rt,
                   token.remark, token.expiry_time, token.is_active,
                   token.plan_type, token.plan_title, token.subscription_end,
                   token.sora2_supported, token.sora2_invite_code,
                   token.sora2_redeemed_count, token.sora2_total_count,
                   token.sora2_remaining_count, token.sora2_cooldown_until,
-                  token.image_enabled, token.video_enabled))
+                  token.image_enabled, token.video_enabled,
+                  token.image_concurrency, token.video_concurrency))
             await db.commit()
             token_id = cursor.lastrowid
 
@@ -580,6 +585,16 @@ class Database:
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             cursor = await db.execute("SELECT * FROM tokens WHERE token = ?", (token,))
+            row = await cursor.fetchone()
+            if row:
+                return Token(**dict(row))
+            return None
+
+    async def get_token_by_email(self, email: str) -> Optional[Token]:
+        """Get token by email"""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute("SELECT * FROM tokens WHERE email = ?", (email,))
             row = await cursor.fetchone()
             if row:
                 return Token(**dict(row))
@@ -677,7 +692,9 @@ class Database:
                           plan_title: Optional[str] = None,
                           subscription_end: Optional[datetime] = None,
                           image_enabled: Optional[bool] = None,
-                          video_enabled: Optional[bool] = None):
+                          video_enabled: Optional[bool] = None,
+                          image_concurrency: Optional[int] = None,
+                          video_concurrency: Optional[int] = None):
         """Update token (AT, ST, RT, remark, expiry_time, subscription info, image_enabled, video_enabled)"""
         async with aiosqlite.connect(self.db_path) as db:
             # Build dynamic update query
@@ -723,6 +740,14 @@ class Database:
             if video_enabled is not None:
                 updates.append("video_enabled = ?")
                 params.append(video_enabled)
+
+            if image_concurrency is not None:
+                updates.append("image_concurrency = ?")
+                params.append(image_concurrency)
+
+            if video_concurrency is not None:
+                updates.append("video_concurrency = ?")
+                params.append(video_concurrency)
 
             if updates:
                 params.append(token_id)

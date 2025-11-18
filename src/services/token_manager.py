@@ -10,6 +10,7 @@ from ..core.database import Database
 from ..core.models import Token, TokenStats
 from ..core.config import config
 from .proxy_manager import ProxyManager
+from ..core.logger import debug_logger
 
 class TokenManager:
     """Token lifecycle manager"""
@@ -416,6 +417,7 @@ class TokenManager:
 
     async def st_to_at(self, session_token: str) -> dict:
         """Convert Session Token to Access Token"""
+        debug_logger.log_info(f"[ST_TO_AT] 开始转换 Session Token 为 Access Token...")
         proxy_url = await self.proxy_manager.get_proxy_url()
 
         async with AsyncSession() as session:
@@ -434,24 +436,68 @@ class TokenManager:
 
             if proxy_url:
                 kwargs["proxy"] = proxy_url
+                debug_logger.log_info(f"[ST_TO_AT] 使用代理: {proxy_url}")
 
-            response = await session.get(
-                "https://sora.chatgpt.com/api/auth/session",
-                **kwargs
-            )
+            url = "https://sora.chatgpt.com/api/auth/session"
+            debug_logger.log_info(f"[ST_TO_AT] 📡 请求 URL: {url}")
 
-            if response.status_code != 200:
-                raise ValueError(f"Failed to convert ST to AT: {response.status_code}")
+            try:
+                response = await session.get(url, **kwargs)
+                debug_logger.log_info(f"[ST_TO_AT] 📥 响应状态码: {response.status_code}")
 
-            data = response.json()
-            return {
-                "access_token": data.get("accessToken"),
-                "email": data.get("user", {}).get("email"),
-                "expires": data.get("expires")
-            }
+                if response.status_code != 200:
+                    error_msg = f"Failed to convert ST to AT: {response.status_code}"
+                    debug_logger.log_info(f"[ST_TO_AT] ❌ {error_msg}")
+                    debug_logger.log_info(f"[ST_TO_AT] 响应内容: {response.text[:500]}")
+                    raise ValueError(error_msg)
+
+                # 获取响应文本用于调试
+                response_text = response.text
+                debug_logger.log_info(f"[ST_TO_AT] 📄 响应内容: {response_text[:500]}")
+
+                # 检查响应是否为空
+                if not response_text or response_text.strip() == "":
+                    debug_logger.log_info(f"[ST_TO_AT] ❌ 响应体为空")
+                    raise ValueError("Response body is empty")
+
+                try:
+                    data = response.json()
+                except Exception as json_err:
+                    debug_logger.log_info(f"[ST_TO_AT] ❌ JSON解析失败: {str(json_err)}")
+                    debug_logger.log_info(f"[ST_TO_AT] 原始响应: {response_text[:1000]}")
+                    raise ValueError(f"Failed to parse JSON response: {str(json_err)}")
+
+                # 检查data是否为None
+                if data is None:
+                    debug_logger.log_info(f"[ST_TO_AT] ❌ 响应JSON为空")
+                    raise ValueError("Response JSON is empty")
+
+                access_token = data.get("accessToken")
+                email = data.get("user", {}).get("email") if data.get("user") else None
+                expires = data.get("expires")
+
+                # 检查必要字段
+                if not access_token:
+                    debug_logger.log_info(f"[ST_TO_AT] ❌ 响应中缺少 accessToken 字段")
+                    debug_logger.log_info(f"[ST_TO_AT] 响应数据: {data}")
+                    raise ValueError("Missing accessToken in response")
+
+                debug_logger.log_info(f"[ST_TO_AT] ✅ ST 转换成功")
+                debug_logger.log_info(f"  - Email: {email}")
+                debug_logger.log_info(f"  - 过期时间: {expires}")
+
+                return {
+                    "access_token": access_token,
+                    "email": email,
+                    "expires": expires
+                }
+            except Exception as e:
+                debug_logger.log_info(f"[ST_TO_AT] 🔴 异常: {str(e)}")
+                raise
     
     async def rt_to_at(self, refresh_token: str) -> dict:
         """Convert Refresh Token to Access Token"""
+        debug_logger.log_info(f"[RT_TO_AT] 开始转换 Refresh Token 为 Access Token...")
         proxy_url = await self.proxy_manager.get_proxy_url()
 
         async with AsyncSession() as session:
@@ -474,21 +520,64 @@ class TokenManager:
 
             if proxy_url:
                 kwargs["proxy"] = proxy_url
+                debug_logger.log_info(f"[RT_TO_AT] 使用代理: {proxy_url}")
 
-            response = await session.post(
-                "https://auth.openai.com/oauth/token",
-                **kwargs
-            )
+            url = "https://auth.openai.com/oauth/token"
+            debug_logger.log_info(f"[RT_TO_AT] 📡 请求 URL: {url}")
 
-            if response.status_code != 200:
-                raise ValueError(f"Failed to convert RT to AT: {response.status_code} - {response.text}")
+            try:
+                response = await session.post(url, **kwargs)
+                debug_logger.log_info(f"[RT_TO_AT] 📥 响应状态码: {response.status_code}")
 
-            data = response.json()
-            return {
-                "access_token": data.get("access_token"),
-                "refresh_token": data.get("refresh_token"),
-                "expires_in": data.get("expires_in")
-            }
+                if response.status_code != 200:
+                    error_msg = f"Failed to convert RT to AT: {response.status_code}"
+                    debug_logger.log_info(f"[RT_TO_AT] ❌ {error_msg}")
+                    debug_logger.log_info(f"[RT_TO_AT] 响应内容: {response.text[:500]}")
+                    raise ValueError(f"{error_msg} - {response.text}")
+
+                # 获取响应文本用于调试
+                response_text = response.text
+                debug_logger.log_info(f"[RT_TO_AT] 📄 响应内容: {response_text[:500]}")
+
+                # 检查响应是否为空
+                if not response_text or response_text.strip() == "":
+                    debug_logger.log_info(f"[RT_TO_AT] ❌ 响应体为空")
+                    raise ValueError("Response body is empty")
+
+                try:
+                    data = response.json()
+                except Exception as json_err:
+                    debug_logger.log_info(f"[RT_TO_AT] ❌ JSON解析失败: {str(json_err)}")
+                    debug_logger.log_info(f"[RT_TO_AT] 原始响应: {response_text[:1000]}")
+                    raise ValueError(f"Failed to parse JSON response: {str(json_err)}")
+
+                # 检查data是否为None
+                if data is None:
+                    debug_logger.log_info(f"[RT_TO_AT] ❌ 响应JSON为空")
+                    raise ValueError("Response JSON is empty")
+
+                access_token = data.get("access_token")
+                new_refresh_token = data.get("refresh_token")
+                expires_in = data.get("expires_in")
+
+                # 检查必要字段
+                if not access_token:
+                    debug_logger.log_info(f"[RT_TO_AT] ❌ 响应中缺少 access_token 字段")
+                    debug_logger.log_info(f"[RT_TO_AT] 响应数据: {data}")
+                    raise ValueError("Missing access_token in response")
+
+                debug_logger.log_info(f"[RT_TO_AT] ✅ RT 转换成功")
+                debug_logger.log_info(f"  - 新 Access Token 有效期: {expires_in} 秒")
+                debug_logger.log_info(f"  - Refresh Token 已更新: {'是' if new_refresh_token else '否'}")
+
+                return {
+                    "access_token": access_token,
+                    "refresh_token": new_refresh_token,
+                    "expires_in": expires_in
+                }
+            except Exception as e:
+                debug_logger.log_info(f"[RT_TO_AT] 🔴 异常: {str(e)}")
+                raise
     
     async def add_token(self, token_value: str,
                        st: Optional[str] = None,
@@ -496,7 +585,9 @@ class TokenManager:
                        remark: Optional[str] = None,
                        update_if_exists: bool = False,
                        image_enabled: bool = True,
-                       video_enabled: bool = True) -> Token:
+                       video_enabled: bool = True,
+                       image_concurrency: int = -1,
+                       video_concurrency: int = -1) -> Token:
         """Add a new Access Token to database
 
         Args:
@@ -507,6 +598,8 @@ class TokenManager:
             update_if_exists: If True, update existing token instead of raising error
             image_enabled: Enable image generation (default: True)
             video_enabled: Enable video generation (default: True)
+            image_concurrency: Image concurrency limit (-1 for no limit)
+            video_concurrency: Video concurrency limit (-1 for no limit)
 
         Returns:
             Token object
@@ -640,7 +733,9 @@ class TokenManager:
             sora2_total_count=sora2_total_count,
             sora2_remaining_count=sora2_remaining_count,
             image_enabled=image_enabled,
-            video_enabled=video_enabled
+            video_enabled=video_enabled,
+            image_concurrency=image_concurrency,
+            video_concurrency=video_concurrency
         )
 
         # Save to database
@@ -712,8 +807,10 @@ class TokenManager:
                           rt: Optional[str] = None,
                           remark: Optional[str] = None,
                           image_enabled: Optional[bool] = None,
-                          video_enabled: Optional[bool] = None):
-        """Update token (AT, ST, RT, remark, image_enabled, video_enabled)"""
+                          video_enabled: Optional[bool] = None,
+                          image_concurrency: Optional[int] = None,
+                          video_concurrency: Optional[int] = None):
+        """Update token (AT, ST, RT, remark, image_enabled, video_enabled, concurrency limits)"""
         # If token (AT) is updated, decode JWT to get new expiry time
         expiry_time = None
         if token:
@@ -724,7 +821,8 @@ class TokenManager:
                 pass  # If JWT decode fails, keep expiry_time as None
 
         await self.db.update_token(token_id, token=token, st=st, rt=rt, remark=remark, expiry_time=expiry_time,
-                                   image_enabled=image_enabled, video_enabled=video_enabled)
+                                   image_enabled=image_enabled, video_enabled=video_enabled,
+                                   image_concurrency=image_concurrency, video_concurrency=video_concurrency)
 
     async def get_active_tokens(self) -> List[Token]:
         """Get all active tokens (not cooled down)"""
@@ -880,68 +978,104 @@ class TokenManager:
             True if refresh successful, False otherwise
         """
         try:
+            # 📍 Step 1: 获取Token数据
+            debug_logger.log_info(f"[AUTO_REFRESH] 开始检查Token {token_id}...")
             token_data = await self.db.get_token(token_id)
+
             if not token_data:
+                debug_logger.log_info(f"[AUTO_REFRESH] ❌ Token {token_id} 不存在")
                 return False
 
-            # Check if token is expiring within 24 hours
+            # 📍 Step 2: 检查是否有过期时间
             if not token_data.expiry_time:
+                debug_logger.log_info(f"[AUTO_REFRESH] ⏭️  Token {token_id} 无过期时间，跳过刷新")
                 return False  # No expiry time set
 
+            # 📍 Step 3: 计算剩余时间
             time_until_expiry = token_data.expiry_time - datetime.now()
             hours_until_expiry = time_until_expiry.total_seconds() / 3600
 
-            # Only refresh if expiry is within 24 hours (1440 minutes)
+            debug_logger.log_info(f"[AUTO_REFRESH] ⏰ Token {token_id} 信息:")
+            debug_logger.log_info(f"  - Email: {token_data.email}")
+            debug_logger.log_info(f"  - 过期时间: {token_data.expiry_time.strftime('%Y-%m-%d %H:%M:%S')}")
+            debug_logger.log_info(f"  - 剩余时间: {hours_until_expiry:.2f} 小时")
+            debug_logger.log_info(f"  - 是否激活: {token_data.is_active}")
+            debug_logger.log_info(f"  - 有ST: {'是' if token_data.st else '否'}")
+            debug_logger.log_info(f"  - 有RT: {'是' if token_data.rt else '否'}")
+
+            # 📍 Step 4: 检查是否需要刷新
             if hours_until_expiry > 24:
+                debug_logger.log_info(f"[AUTO_REFRESH] ⏭️  Token {token_id} 剩余时间 > 24小时，无需刷新")
                 return False  # Token not expiring soon
 
+            # 📍 Step 5: 触发刷新
             if hours_until_expiry < 0:
-                # Token already expired, still try to refresh
-                print(f"🔄 Token {token_id} 已过期，尝试自动刷新...")
+                debug_logger.log_info(f"[AUTO_REFRESH] 🔴 Token {token_id} 已过期，尝试自动刷新...")
             else:
-                print(f"🔄 Token {token_id} 将在 {hours_until_expiry:.1f} 小时后过期，尝试自动刷新...")
+                debug_logger.log_info(f"[AUTO_REFRESH] 🟡 Token {token_id} 将在 {hours_until_expiry:.2f} 小时后过期，尝试自动刷新...")
 
             # Priority: ST > RT
             new_at = None
             new_st = None
             new_rt = None
+            refresh_method = None
 
+            # 📍 Step 6: 尝试使用ST刷新
             if token_data.st:
-                # Try to refresh using ST
                 try:
-                    print(f"📝 使用 ST 刷新 Token {token_id}...")
+                    debug_logger.log_info(f"[AUTO_REFRESH] 📝 Token {token_id}: 尝试使用 ST 刷新...")
                     result = await self.st_to_at(token_data.st)
                     new_at = result.get("access_token")
-                    # ST refresh doesn't return new ST, so keep the old one
-                    new_st = token_data.st
-                    print(f"✅ 使用 ST 刷新成功")
+                    new_st = token_data.st  # ST refresh doesn't return new ST, so keep the old one
+                    refresh_method = "ST"
+                    debug_logger.log_info(f"[AUTO_REFRESH] ✅ Token {token_id}: 使用 ST 刷新成功")
                 except Exception as e:
-                    print(f"❌ 使用 ST 刷新失败: {e}")
+                    debug_logger.log_info(f"[AUTO_REFRESH] ❌ Token {token_id}: 使用 ST 刷新失败 - {str(e)}")
                     new_at = None
 
+            # 📍 Step 7: 如果ST失败，尝试使用RT
             if not new_at and token_data.rt:
-                # Try to refresh using RT
                 try:
-                    print(f"📝 使用 RT 刷新 Token {token_id}...")
+                    debug_logger.log_info(f"[AUTO_REFRESH] 📝 Token {token_id}: 尝试使用 RT 刷新...")
                     result = await self.rt_to_at(token_data.rt)
                     new_at = result.get("access_token")
                     new_rt = result.get("refresh_token", token_data.rt)  # RT might be updated
-                    print(f"✅ 使用 RT 刷新成功")
+                    refresh_method = "RT"
+                    debug_logger.log_info(f"[AUTO_REFRESH] ✅ Token {token_id}: 使用 RT 刷新成功")
                 except Exception as e:
-                    print(f"❌ 使用 RT 刷新失败: {e}")
+                    debug_logger.log_info(f"[AUTO_REFRESH] ❌ Token {token_id}: 使用 RT 刷新失败 - {str(e)}")
                     new_at = None
 
+            # 📍 Step 8: 处理刷新结果
             if new_at:
-                # Update token with new AT
+                # 刷新成功: 更新Token
+                debug_logger.log_info(f"[AUTO_REFRESH] 💾 Token {token_id}: 保存新的 Access Token...")
                 await self.update_token(token_id, token=new_at, st=new_st, rt=new_rt)
-                print(f"✅ Token {token_id} 已自动刷新")
+
+                # 获取更新后的Token信息
+                updated_token = await self.db.get_token(token_id)
+                new_expiry_time = updated_token.expiry_time
+                new_hours_until_expiry = ((new_expiry_time - datetime.now()).total_seconds() / 3600) if new_expiry_time else -1
+
+                debug_logger.log_info(f"[AUTO_REFRESH] ✅ Token {token_id} 已自动刷新成功")
+                debug_logger.log_info(f"  - 刷新方式: {refresh_method}")
+                debug_logger.log_info(f"  - 新过期时间: {new_expiry_time.strftime('%Y-%m-%d %H:%M:%S') if new_expiry_time else 'N/A'}")
+                debug_logger.log_info(f"  - 新剩余时间: {new_hours_until_expiry:.2f} 小时")
+
+                # 📍 Step 9: 检查刷新后的过期时间
+                if new_hours_until_expiry < 0:
+                    # 刷新后仍然过期，禁用Token
+                    debug_logger.log_info(f"[AUTO_REFRESH] 🔴 Token {token_id}: 刷新后仍然过期（剩余时间: {new_hours_until_expiry:.2f} 小时），已禁用")
+                    await self.disable_token(token_id)
+                    return False
+
                 return True
             else:
-                # No ST or RT, disable token
-                print(f"⚠️  Token {token_id} 无法刷新（无 ST 或 RT），已禁用")
+                # 刷新失败: 禁用Token
+                debug_logger.log_info(f"[AUTO_REFRESH] 🚫 Token {token_id}: 无法刷新（无有效的 ST 或 RT），已禁用")
                 await self.disable_token(token_id)
                 return False
 
         except Exception as e:
-            print(f"❌ 自动刷新 Token {token_id} 失败: {e}")
+            debug_logger.log_info(f"[AUTO_REFRESH] 🔴 Token {token_id}: 自动刷新异常 - {str(e)}")
             return False

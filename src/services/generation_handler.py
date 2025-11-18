@@ -11,6 +11,7 @@ from .sora_client import SoraClient
 from .token_manager import TokenManager
 from .load_balancer import LoadBalancer
 from .file_cache import FileCache
+from .concurrency_manager import ConcurrencyManager
 from ..core.database import Database
 from ..core.models import Task, RequestLog
 from ..core.config import config
@@ -71,11 +72,13 @@ class GenerationHandler:
     """Handle generation requests"""
 
     def __init__(self, sora_client: SoraClient, token_manager: TokenManager,
-                 load_balancer: LoadBalancer, db: Database, proxy_manager=None):
+                 load_balancer: LoadBalancer, db: Database, proxy_manager=None,
+                 concurrency_manager: Optional[ConcurrencyManager] = None):
         self.sora_client = sora_client
         self.token_manager = token_manager
         self.load_balancer = load_balancer
         self.db = db
+        self.concurrency_manager = concurrency_manager
         self.file_cache = FileCache(
             cache_dir="tmp",
             default_timeout=config.cache_timeout,
@@ -287,6 +290,19 @@ class GenerationHandler:
             if not lock_acquired:
                 raise Exception(f"Failed to acquire lock for token {token_obj.id}")
 
+            # Acquire concurrency slot for image generation
+            if self.concurrency_manager:
+                concurrency_acquired = await self.concurrency_manager.acquire_image(token_obj.id)
+                if not concurrency_acquired:
+                    await self.load_balancer.token_lock.release_lock(token_obj.id)
+                    raise Exception(f"Failed to acquire concurrency slot for token {token_obj.id}")
+
+        # Acquire concurrency slot for video generation
+        if is_video and self.concurrency_manager:
+            concurrency_acquired = await self.concurrency_manager.acquire_video(token_obj.id)
+            if not concurrency_acquired:
+                raise Exception(f"Failed to acquire concurrency slot for token {token_obj.id}")
+
         task_id = None
         is_first_chunk = True  # Track if this is the first chunk
 
@@ -364,6 +380,13 @@ class GenerationHandler:
             # Release lock for image generation
             if is_image:
                 await self.load_balancer.token_lock.release_lock(token_obj.id)
+                # Release concurrency slot for image generation
+                if self.concurrency_manager:
+                    await self.concurrency_manager.release_image(token_obj.id)
+
+            # Release concurrency slot for video generation
+            if is_video and self.concurrency_manager:
+                await self.concurrency_manager.release_video(token_obj.id)
 
             # Log successful request
             duration = time.time() - start_time
@@ -380,6 +403,13 @@ class GenerationHandler:
             # Release lock for image generation on error
             if is_image and token_obj:
                 await self.load_balancer.token_lock.release_lock(token_obj.id)
+                # Release concurrency slot for image generation
+                if self.concurrency_manager:
+                    await self.concurrency_manager.release_image(token_obj.id)
+
+            # Release concurrency slot for video generation on error
+            if is_video and token_obj and self.concurrency_manager:
+                await self.concurrency_manager.release_video(token_obj.id)
 
             # Record error
             if token_obj:
@@ -431,6 +461,15 @@ class GenerationHandler:
                 if not is_video and token_id:
                     await self.load_balancer.token_lock.release_lock(token_id)
                     debug_logger.log_info(f"Released lock for token {token_id} due to timeout")
+                    # Release concurrency slot for image generation
+                    if self.concurrency_manager:
+                        await self.concurrency_manager.release_image(token_id)
+                        debug_logger.log_info(f"Released concurrency slot for token {token_id} due to timeout")
+
+                # Release concurrency slot for video generation
+                if is_video and token_id and self.concurrency_manager:
+                    await self.concurrency_manager.release_video(token_id)
+                    debug_logger.log_info(f"Released concurrency slot for token {token_id} due to timeout")
 
                 await self.db.update_task(task_id, "failed", 0, error_message=f"Generation timeout after {elapsed_time:.1f} seconds")
                 raise Exception(f"Upstream API timeout: Generation exceeded {timeout} seconds limit")
@@ -783,6 +822,15 @@ class GenerationHandler:
         if not is_video and token_id:
             await self.load_balancer.token_lock.release_lock(token_id)
             debug_logger.log_info(f"Released lock for token {token_id} due to max attempts reached")
+            # Release concurrency slot for image generation
+            if self.concurrency_manager:
+                await self.concurrency_manager.release_image(token_id)
+                debug_logger.log_info(f"Released concurrency slot for token {token_id} due to max attempts reached")
+
+        # Release concurrency slot for video generation
+        if is_video and token_id and self.concurrency_manager:
+            await self.concurrency_manager.release_video(token_id)
+            debug_logger.log_info(f"Released concurrency slot for token {token_id} due to max attempts reached")
 
         await self.db.update_task(task_id, "failed", 0, error_message=f"Generation timeout after {timeout} seconds")
         raise Exception(f"Upstream API timeout: Generation exceeded {timeout} seconds limit")
