@@ -14,6 +14,7 @@ from ..services.proxy_manager import ProxyManager
 from ..services.concurrency_manager import ConcurrencyManager
 from ..core.database import Database
 from ..core.models import Token, AdminConfig, ProxyConfig
+from ..core.logger import debug_logger
 
 router = APIRouter()
 
@@ -148,6 +149,11 @@ class UpdateWatermarkFreeConfigRequest(BaseModel):
     parse_method: Optional[str] = "third_party"  # "third_party" or "custom"
     custom_parse_url: Optional[str] = None
     custom_parse_token: Optional[str] = None
+
+class UpdateCaptchaConfigRequest(BaseModel):
+    captcha_method: str = "yescaptcha"
+    yescaptcha_api_key: Optional[str] = None
+    yescaptcha_api_url: Optional[str] = "https://api.yescaptcha.com"
 
 class BatchDisableRequest(BaseModel):
     token_ids: List[int]
@@ -822,6 +828,40 @@ async def update_watermark_free_config(
 
         return {"success": True, "message": "Watermark-free mode configuration updated"}
     except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+# Captcha config endpoints
+@router.get("/api/captcha/config")
+async def get_captcha_config(token: str = Depends(verify_admin_token)) -> dict:
+    """Get captcha configuration"""
+    config_obj = await db.get_captcha_config()
+    return {
+        "captcha_method": config_obj.captcha_method,
+        "yescaptcha_api_key": config_obj.yescaptcha_api_key or "",
+        "yescaptcha_api_url": config_obj.yescaptcha_api_url
+    }
+
+@router.post("/api/captcha/config")
+async def update_captcha_config(
+    request: UpdateCaptchaConfigRequest,
+    token: str = Depends(verify_admin_token)
+):
+    """Update captcha configuration"""
+    try:
+        await db.update_captcha_config(
+            captcha_method=request.captcha_method,
+            yescaptcha_api_key=request.yescaptcha_api_key,
+            yescaptcha_api_url=request.yescaptcha_api_url
+        )
+        return {"success": True, "message": "验证码配置更新成功"}
+    except Exception as e:
+        import traceback
+        error_detail = f"{str(e)}\n{traceback.format_exc()}"
+        debug_logger.log_error(
+            error_message=f"Failed to update captcha config: {error_detail}",
+            status_code=400,
+            response_text=error_detail
+        )
         raise HTTPException(status_code=400, detail=str(e))
 
 # Statistics endpoints

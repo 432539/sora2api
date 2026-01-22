@@ -40,6 +40,8 @@ class Token(BaseModel):
     video_concurrency: int = -1  # 视频并发数限制，-1表示不限制
     # 过期标记
     is_expired: bool = False  # Token是否已过期（401 token_invalidated）
+    # 设备ID（用于模拟浏览器会话）
+    device_id: Optional[str] = None  # Device ID (oai-did cookie)
 
 class TokenStats(BaseModel):
     """Token statistics"""
@@ -115,6 +117,15 @@ class CacheConfig(BaseModel):
     cache_enabled: bool  # Read from database, initialized from setting.toml on first startup
     cache_timeout: int  # Read from database, initialized from setting.toml on first startup
     cache_base_url: Optional[str] = None  # Read from database, initialized from setting.toml on first startup
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+class CaptchaConfig(BaseModel):
+    """Captcha configuration"""
+    id: int = 1
+    captcha_method: str = "yescaptcha"  # Read from database, initialized from setting.toml on first startup
+    yescaptcha_api_key: Optional[str] = None  # Read from database, initialized from setting.toml on first startup
+    yescaptcha_api_url: str = "https://api.yescaptcha.com"  # Read from database, initialized from setting.toml on first startup
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 

@@ -74,7 +74,7 @@ class TokenManager:
             kwargs = {
                 "headers": headers,
                 "timeout": 30,
-                "impersonate": "chrome"  # 自动生成 User-Agent 和浏览器指纹
+                "impersonate": config.impersonate_browser  # 自动生成 User-Agent 和浏览器指纹
             }
 
             if proxy_url:
@@ -124,7 +124,7 @@ class TokenManager:
             kwargs = {
                 "headers": headers,
                 "timeout": 30,
-                "impersonate": "chrome"  # 自动生成 User-Agent 和浏览器指纹
+                "impersonate": config.impersonate_browser  # 自动生成 User-Agent 和浏览器指纹
             }
 
             if proxy_url:
@@ -187,7 +187,7 @@ class TokenManager:
             kwargs = {
                 "headers": headers,
                 "timeout": 30,
-                "impersonate": "chrome"  # 自动生成 User-Agent 和浏览器指纹
+                "impersonate": config.impersonate_browser  # 自动生成 User-Agent 和浏览器指纹
             }
 
             if proxy_url:
@@ -296,7 +296,7 @@ class TokenManager:
             kwargs = {
                 "headers": headers,
                 "timeout": 30,
-                "impersonate": "chrome"  # 自动生成 User-Agent 和浏览器指纹
+                "impersonate": config.impersonate_browser  # 自动生成 User-Agent 和浏览器指纹
             }
 
             if proxy_url:
@@ -425,32 +425,49 @@ class TokenManager:
                 print(f"📄 响应内容: {response.text[:500]}")
                 raise Exception(f"Failed to set username: {response.status_code}")
 
-    async def activate_sora2_invite(self, access_token: str, invite_code: str) -> dict:
-        """Activate Sora2 with invite code"""
+    async def activate_sora2_invite(self, access_token: str, invite_code: str, token_id: Optional[int] = None) -> dict:
+        """Activate Sora2 with invite code
+        
+        Args:
+            access_token: Access token
+            invite_code: Sora2 invite code
+            token_id: Token ID for getting device_id from database (optional)
+        """
         import uuid
         proxy_url = await self.proxy_manager.get_proxy_url()
 
         print(f"🔍 开始激活Sora2邀请码: {invite_code}")
         print(f"🔑 Access Token 前缀: {access_token[:50]}...")
 
-        async with AsyncSession() as session:
-            # 生成设备ID
+        # Get device_id from database if token_id provided, otherwise generate new one
+        device_id = None
+        if token_id and self.db:
+            try:
+                token_obj = await self.db.get_token(token_id)
+                if token_obj and token_obj.device_id:
+                    device_id = token_obj.device_id
+                    print(f"🆔 使用已存储的设备ID: {device_id[:20]}...")
+            except Exception as e:
+                print(f"⚠️  获取设备ID失败: {e}")
+        
+        # Generate new device_id if not found in database
+        if not device_id:
             device_id = str(uuid.uuid4())
+            print(f"🆔 生成新设备ID: {device_id}")
 
+        async with AsyncSession() as session:
             # 只设置必要的头，让 impersonate 处理其他
             headers = {
                 "authorization": f"Bearer {access_token}",
                 "cookie": f"oai-did={device_id}"
             }
-
-            print(f"🆔 设备ID: {device_id}")
             print(f"📦 请求体: {{'invite_code': '{invite_code}'}}")
 
             kwargs = {
                 "headers": headers,
                 "json": {"invite_code": invite_code},
                 "timeout": 30,
-                "impersonate": "chrome120"  # 使用 chrome120 让库自动处理 UA 等头
+                "impersonate": config.impersonate_browser  # 使用配置的浏览器指纹
             }
 
             if proxy_url:
@@ -492,7 +509,7 @@ class TokenManager:
             kwargs = {
                 "headers": headers,
                 "timeout": 30,
-                "impersonate": "chrome"  # 自动生成 User-Agent 和浏览器指纹
+                "impersonate": config.impersonate_browser  # 自动生成 User-Agent 和浏览器指纹
             }
 
             if proxy_url:
@@ -564,8 +581,9 @@ class TokenManager:
             client_id: Client ID (optional, uses default if not provided)
             proxy_url: Proxy URL (optional, uses global proxy if not provided)
         """
-        # Use provided client_id or default
-        effective_client_id = client_id or "app_LlGpXReQgckcGGUo2JrYvtJK"
+        # Use provided client_id or default from config
+        from ..core.config import config
+        effective_client_id = client_id or config.default_client_id
 
         debug_logger.log_info(f"[RT_TO_AT] 开始转换 Refresh Token 为 Access Token...")
         debug_logger.log_info(f"[RT_TO_AT] 使用 Client ID: {effective_client_id[:20]}...")
@@ -586,7 +604,7 @@ class TokenManager:
                     "refresh_token": refresh_token
                 },
                 "timeout": 30,
-                "impersonate": "chrome"  # 自动生成 User-Agent 和浏览器指纹
+                "impersonate": config.impersonate_browser  # 自动生成 User-Agent 和浏览器指纹
             }
 
             if proxy_url:
@@ -810,6 +828,10 @@ class TokenManager:
             except Exception as e:
                 print(f"⚠️  用户名检查/设置过程中出错: {e}")
 
+        # Generate device_id if not provided (for simulating browser session)
+        import uuid
+        device_id = str(uuid.uuid4())
+
         # Create token object
         token = Token(
             token=token_value,
@@ -833,7 +855,8 @@ class TokenManager:
             image_enabled=image_enabled,
             video_enabled=video_enabled,
             image_concurrency=image_concurrency,
-            video_concurrency=video_concurrency
+            video_concurrency=video_concurrency,
+            device_id=device_id
         )
 
         # Save to database

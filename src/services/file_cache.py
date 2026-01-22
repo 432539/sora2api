@@ -156,7 +156,7 @@ class FileCache:
 
             # Download with proxy support
             async with AsyncSession() as session:
-                kwargs = {"timeout": 60, "impersonate": "chrome"}
+                kwargs = {"timeout": 60, "impersonate": config.impersonate_browser}
                 if proxy_url:
                     kwargs["proxy"] = proxy_url
                 response = await session.get(url, **kwargs)

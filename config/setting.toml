@@ -44,3 +44,19 @@ custom_parse_token = ""
 
 [token_refresh]
 at_auto_refresh_enabled = false
+
+[captcha]
+captcha_method = "yescaptcha"
+yescaptcha_api_key = ""
+yescaptcha_api_url = "https://api.yescaptcha.com"
+
+[fingerprint]
+# 浏览器指纹模拟类型
+# 可选值: chrome, chrome120, chrome131, safari, firefox, edge
+# curl_cffi 会自动生成对应的 User-Agent、TLS 指纹、HTTP/2 指纹等
+impersonate = "chrome"
+
+# 默认 Client ID（用于 RT 刷新）
+# 注意：Client ID 与 RT 绑定，不能随意修改，否则会导致 token 刷新失败
+# 如果 RT 来自不同的客户端（iOS/Android/Web），需要使用对应的 Client ID
+default_client_id = "app_LlGpXReQgckcGGUo2JrYvtJK"

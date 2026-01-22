@@ -351,7 +351,7 @@ class GenerationHandler:
 
         kwargs = {
             "timeout": 30,
-            "impersonate": "chrome"
+            "impersonate": config.impersonate_browser
         }
 
         if proxy_url:
@@ -517,7 +517,7 @@ class GenerationHandler:
                     is_first_chunk = False
 
                 image_data = self._decode_base64_image(image)
-                media_id = await self.sora_client.upload_image(image_data, token_obj.token)
+                media_id = await self.sora_client.upload_image(image_data, token_obj.token, token_id=token_obj.id)
 
                 if stream:
                     yield self._format_stream_chunk(
@@ -671,27 +671,53 @@ class GenerationHandler:
             except:
                 pass
 
-            # Check for CF shield/429 error
+            # Check for CF shield/429 error and too_many_concurrent_tasks
             is_cf_or_429 = False
+            is_too_many_concurrent = False
             if error_response and isinstance(error_response, dict):
                 error_info = error_response.get("error", {})
                 if error_info.get("code") == "cf_shield_429":
                     is_cf_or_429 = True
+                elif error_info.get("code") == "too_many_concurrent_tasks":
+                    is_too_many_concurrent = True
 
             # Record error (check if it's an overload error or CF/429 error)
             if token_obj:
                 error_str = str(e).lower()
                 is_overload = "heavy_load" in error_str or "under heavy load" in error_str
-                # Don't record error for CF shield/429 (not token's fault)
-                if not is_cf_or_429:
+                # Don't record error for CF shield/429 or too_many_concurrent_tasks (not token's fault)
+                if not is_cf_or_429 and not is_too_many_concurrent:
                     await self.token_manager.record_error(token_obj.id, is_overload=is_overload)
+
+            # Check if it's a heavy_load error - format it for frontend retry
+            is_heavy_load = False
+            if error_response and isinstance(error_response, dict):
+                error_info = error_response.get("error", {})
+                if error_info.get("code") == "heavy_load" or "heavy_load" in str(error_response).lower():
+                    is_heavy_load = True
+                    # Format error for frontend to recognize as retryable
+                    error_response = {
+                        "error": {
+                            "message": "We're under heavy load, please try again later.",
+                            "type": "invalid_request_error",
+                            "param": None,
+                            "code": "heavy_load"
+                        }
+                    }
 
             # Update log entry with error data
             duration = time.time() - start_time
             if log_id:
                 if error_response:
-                    # Structured error (e.g., unsupported_country_code, cf_shield_429)
-                    status_code = 429 if is_cf_or_429 else 400
+                    # Structured error (e.g., unsupported_country_code, cf_shield_429, heavy_load, too_many_concurrent_tasks)
+                    if is_too_many_concurrent:
+                        status_code = 429
+                    elif is_cf_or_429:
+                        status_code = 429
+                    elif is_heavy_load:
+                        status_code = 503
+                    else:
+                        status_code = 400
                     await self.db.update_request_log(
                         log_id,
                         response_body=json.dumps(error_response),
@@ -706,6 +732,11 @@ class GenerationHandler:
                         status_code=500,
                         duration=duration
                     )
+            
+            # Re-raise with formatted error if it's a structured error
+            if error_response and isinstance(error_response, dict) and "error" in error_response:
+                import json
+                raise Exception(json.dumps(error_response))
             raise e
     
     async def _poll_task_result(self, task_id: str, token: str, is_video: bool,
@@ -722,6 +753,8 @@ class GenerationHandler:
         heartbeat_interval = 10  # Send heartbeat every 10 seconds for image generation
         last_status_output_time = start_time  # Track last status output time for video generation
         video_status_interval = 30  # Output status every 30 seconds for video generation
+        last_status = None  # Track last status to detect changes
+        first_output = True  # Track if this is the first status output
 
         debug_logger.log_info(f"Starting task polling: task_id={task_id}, is_video={is_video}, timeout={timeout}s, max_attempts={max_attempts}")
 
@@ -796,14 +829,35 @@ class GenerationHandler:
                             # Update database with current progress
                             await self.db.update_task(task_id, "processing", progress_pct)
 
-                            # Output status every 30 seconds (not just when progress changes)
+                            # Output status on first poll, status change, progress change, or every 30 seconds
                             current_time = time.time()
-                            if stream and (current_time - last_status_output_time >= video_status_interval):
+                            status_changed = (last_status is not None and status != last_status)
+                            progress_changed = (progress_pct != last_progress)
+                            time_elapsed = (current_time - last_status_output_time >= video_status_interval)
+                            
+                            # Always output on first poll, status change, or progress change
+                            # Also output every 30 seconds if status is queued (to show it's still waiting)
+                            should_output = (first_output or status_changed or progress_changed or 
+                                           (time_elapsed and status == "queued") or 
+                                           (time_elapsed and status != "queued"))
+                            
+                            if stream and should_output:
                                 last_status_output_time = current_time
+                                last_status = status
+                                first_output = False
+                                
+                                # Add warning if queued for too long
+                                elapsed = current_time - start_time
+                                queued_warning = ""
+                                if status == "queued" and elapsed > 60:
+                                    queued_warning = f" (等待中，已等待 {int(elapsed)} 秒)"
+                                
                                 debug_logger.log_info(f"Task {task_id} progress: {progress_pct}% (status: {status})")
                                 yield self._format_stream_chunk(
-                                    reasoning_content=f"**Video Generation Progress**: {progress_pct}% ({status})\n"
+                                    reasoning_content=f"**Video Generation Progress**: {progress_pct}% ({status}){queued_warning}\n"
                                 )
+                            elif last_status is None:
+                                last_status = status
                             break
 
                     # If task not found in pending tasks, it's completed - fetch from drafts
@@ -895,7 +949,36 @@ class GenerationHandler:
                                             raise Exception("Failed to get post ID from publish API")
 
                                         # Get watermark-free video URL based on parse method
-                                        if parse_method == "custom":
+                                        if parse_method == "sora_downloader":
+                                            # Use built-in parser (no external server needed)
+                                            if stream:
+                                                yield self._format_stream_chunk(
+                                                    reasoning_content=f"Video published successfully. Post ID: {post_id}\nParsing share page to get watermark-free URL...\n"
+                                                )
+
+                                            debug_logger.log_info(f"Using built-in parser for post_id: {post_id}")
+                                            watermark_free_url = await self.sora_client.get_watermark_free_url_builtin(
+                                                post_id=post_id,
+                                                token=token_obj.token if token_obj else None,
+                                                token_id=token_obj.id if token_obj else None
+                                            )
+                                        elif parse_method == "sora_downloader_external":
+                                            # Use external sora-downloader server (legacy option)
+                                            if not watermark_config.custom_parse_url:
+                                                raise Exception("Sora-downloader server URL not configured")
+
+                                            if stream:
+                                                yield self._format_stream_chunk(
+                                                    reasoning_content=f"Video published successfully. Post ID: {post_id}\nUsing external sora-downloader server to get watermark-free URL...\n"
+                                                )
+
+                                            debug_logger.log_info(f"Using external sora-downloader: {watermark_config.custom_parse_url}")
+                                            watermark_free_url = await self.sora_client.get_watermark_free_url_sora_downloader(
+                                                parse_url=watermark_config.custom_parse_url,
+                                                parse_token=watermark_config.custom_parse_token or "",
+                                                post_id=post_id
+                                            )
+                                        elif parse_method == "custom":
                                             # Use custom parse server
                                             if not watermark_config.custom_parse_url or not watermark_config.custom_parse_token:
                                                 raise Exception("Custom parse server URL or token not configured")
@@ -1468,7 +1551,7 @@ class GenerationHandler:
             yield self._format_stream_chunk(
                 reasoning_content="Uploading character avatar...\n"
             )
-            asset_pointer = await self.sora_client.upload_character_image(avatar_data, token_obj.token)
+            asset_pointer = await self.sora_client.upload_character_image(avatar_data, token_obj.token, token_id=token_obj.id)
             debug_logger.log_info(f"Avatar uploaded, asset_pointer: {asset_pointer}")
 
             # Step 5: Finalize character
@@ -1649,7 +1732,7 @@ class GenerationHandler:
             yield self._format_stream_chunk(
                 reasoning_content="Uploading character avatar...\n"
             )
-            asset_pointer = await self.sora_client.upload_character_image(avatar_data, token_obj.token)
+            asset_pointer = await self.sora_client.upload_character_image(avatar_data, token_obj.token, token_id=token_obj.id)
             debug_logger.log_info(f"Avatar uploaded, asset_pointer: {asset_pointer}")
 
             # Step 5: Finalize character

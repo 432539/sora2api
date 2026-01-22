@@ -45,7 +45,15 @@ Thumbs.db
 
 # Logs
 *.log
+logs.txt
 
 # Environment
 .env
 .env.local
+
+# Temporary files
+tmp/
+*.tmp
+
+# Config files with sensitive data (optional, uncomment if you don't want to commit config)
+# config/setting.toml

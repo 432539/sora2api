@@ -2544,7 +2544,7 @@
 
       const url = `${baseUrl}/v1/chat/completions`;
       const isRetryable = (errMsg) =>
-        /timeout|timed out|HTTP\s*5\d\d|503|502|504|bad gateway|gateway time-out|ENETUNREACH|ECONNRESET|ECONNABORTED|ETIMEDOUT|Failed to connect|network|cloudflare|curl|connection closed|closed abruptly/i.test(
+        /timeout|timed out|HTTP\s*5\d\d|503|502|504|bad gateway|gateway time-out|ENETUNREACH|ECONNRESET|ECONNABORTED|ETIMEDOUT|Failed to connect|network|cloudflare|curl|connection closed|closed abruptly|heavy load|heavy_load|under heavy load|try again later|too many concurrent|429/i.test(
           errMsg || ''
         );
 

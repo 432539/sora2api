@@ -208,5 +208,15 @@ class Config:
             self._config["token_refresh"] = {}
         self._config["token_refresh"]["at_auto_refresh_enabled"] = enabled
 
+    @property
+    def impersonate_browser(self) -> str:
+        """Get browser impersonate type for fingerprinting"""
+        return self._config.get("fingerprint", {}).get("impersonate", "chrome")
+
+    @property
+    def default_client_id(self) -> str:
+        """Get default Client ID for RT refresh"""
+        return self._config.get("fingerprint", {}).get("default_client_id", "app_LlGpXReQgckcGGUo2JrYvtJK")
+
 # Global config instance
 config = Config()

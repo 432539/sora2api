@@ -46,7 +46,7 @@ token_manager = TokenManager(db)
 proxy_manager = ProxyManager(db)
 concurrency_manager = ConcurrencyManager()
 load_balancer = LoadBalancer(token_manager, concurrency_manager)
-sora_client = SoraClient(proxy_manager)
+sora_client = SoraClient(proxy_manager, db)
 generation_handler = GenerationHandler(sora_client, token_manager, load_balancer, db, proxy_manager, concurrency_manager)
 
 # Set dependencies for route modules

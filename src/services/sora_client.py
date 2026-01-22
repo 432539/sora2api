@@ -13,9 +13,11 @@ from typing import Optional, Dict, Any, Tuple
 from uuid import uuid4
 from urllib.request import Request, urlopen, build_opener, ProxyHandler
 from urllib.error import HTTPError, URLError
+from http.client import IncompleteRead
 from curl_cffi.requests import AsyncSession
 from curl_cffi import CurlMime
 from .proxy_manager import ProxyManager
+from .captcha_service import YesCaptchaService
 from ..core.config import config
 from ..core.logger import debug_logger
 
@@ -76,8 +78,9 @@ class SoraClient:
     CHATGPT_BASE_URL = "https://chatgpt.com"
     SENTINEL_FLOW = "sora_2_create_task"
 
-    def __init__(self, proxy_manager: ProxyManager):
+    def __init__(self, proxy_manager: ProxyManager, db=None):
         self.proxy_manager = proxy_manager
+        self.db = db
         self.base_url = config.sora_base_url
         self.timeout = config.sora_timeout
 
@@ -193,12 +196,41 @@ class SoraClient:
             else:
                 resp = urlopen(req, timeout=timeout)
 
-            resp_text = resp.read().decode("utf-8")
+            # Read response with error handling for incomplete reads
+            try:
+                resp_text = resp.read().decode("utf-8")
+            except Exception as read_error:
+                # Handle IncompleteRead and other read errors
+                error_msg = str(read_error)
+                if "IncompleteRead" in error_msg:
+                    # Try to read what we can
+                    try:
+                        partial_data = resp.read(999999)  # Try to read remaining data
+                        resp_text = partial_data.decode("utf-8", errors="ignore")
+                        debug_logger.log_error(
+                            error_message=f"IncompleteRead occurred, partial data read: {len(resp_text)} bytes",
+                            status_code=0,
+                            response_text=resp_text[:500] if resp_text else "No data"
+                        )
+                    except:
+                        resp_text = ""
+                    # If we have partial data, try to parse it
+                    if resp_text:
+                        try:
+                            return json.loads(resp_text)
+                        except:
+                            pass
+                raise Exception(f"Failed to read response: {error_msg}")
+            
             if resp.status not in (200, 201):
                 raise Exception(f"Request failed: {resp.status} {resp_text}")
             return json.loads(resp_text)
         except HTTPError as exc:
-            body = exc.read().decode("utf-8", errors="ignore")
+            try:
+                body = exc.read().decode("utf-8", errors="ignore")
+            except Exception as read_error:
+                # Handle IncompleteRead in error response
+                body = f"Failed to read error response: {str(read_error)}"
             raise Exception(f"HTTP Error: {exc.code} {body}") from exc
         except URLError as exc:
             raise Exception(f"URL Error: {exc}") from exc
@@ -354,6 +386,20 @@ class SoraClient:
             "User-Agent" : "Sora/1.2026.007 (Android 15; 24122RKC7C; build 2600700)"
         }
 
+        # 添加 device_id cookie (oai-did) 以模拟真实的浏览器会话
+        if token_id and self.db:
+            try:
+                token_obj = await self.db.get_token(token_id)
+                if token_obj and token_obj.device_id:
+                    # Add device_id as cookie
+                    if "cookie" in headers:
+                        headers["cookie"] += f"; oai-did={token_obj.device_id}"
+                    else:
+                        headers["cookie"] = f"oai-did={token_obj.device_id}"
+            except Exception as e:
+                # If getting device_id fails, continue without it
+                debug_logger.log_info(f"Failed to get device_id for token {token_id}: {e}")
+
         # 只在生成请求时添加 sentinel token
         if add_sentinel_token:
             headers["openai-sentinel-token"] = await self._generate_sentinel_token(token)
@@ -367,7 +413,7 @@ class SoraClient:
             kwargs = {
                 "headers": headers,
                 "timeout": self.timeout,
-                "impersonate": "chrome"  # 自动生成 User-Agent 和浏览器指纹
+                "impersonate": config.impersonate_browser  # 自动生成 User-Agent 和浏览器指纹
             }
 
             if proxy_url:
@@ -403,17 +449,58 @@ class SoraClient:
             # Calculate duration
             duration_ms = (time.time() - start_time) * 1000
 
-            # Parse response
+            # Parse response with comprehensive error handling
+            response_json = None
+            response_text = None
+            
+            # Try to parse JSON response
             try:
                 response_json = response.json()
-            except:
+            except Exception as json_err:
+                json_err_str = str(json_err)
+                # Check if it's an IncompleteRead error (may come from curl_cffi internals)
+                if "IncompleteRead" in json_err_str:
+                    debug_logger.log_error(
+                        error_message=f"IncompleteRead occurred while parsing JSON: {json_err_str}",
+                        status_code=response.status_code,
+                        response_text=json_err_str
+                    )
+                    raise Exception(f"IncompleteRead: {json_err_str}")
+                # For other JSON errors, try to get text response
+                try:
+                    response_text = response.text
+                except Exception as text_err:
+                    text_err_str = str(text_err)
+                    if "IncompleteRead" in text_err_str:
+                        debug_logger.log_error(
+                            error_message=f"IncompleteRead occurred while reading response text: {text_err_str}",
+                            status_code=response.status_code,
+                            response_text=text_err_str
+                        )
+                        raise Exception(f"IncompleteRead: {text_err_str}")
+                    response_text = None
                 response_json = None
+
+            # Get response text if not already obtained
+            if response_text is None:
+                try:
+                    response_text = response.text
+                except Exception as text_err:
+                    text_err_str = str(text_err)
+                    if "IncompleteRead" in text_err_str:
+                        debug_logger.log_error(
+                            error_message=f"IncompleteRead occurred while reading response text: {text_err_str}",
+                            status_code=response.status_code,
+                            response_text=text_err_str
+                        )
+                        raise Exception(f"IncompleteRead: {text_err_str}")
+                    response_text = None
 
             # Log response
             debug_logger.log_response(
                 status_code=response.status_code,
                 headers=dict(response.headers),
-                body=response_json if response_json else response.text,
+                body=response_json if response_json else response_text,
                 duration_ms=duration_ms
             )
 
@@ -422,14 +509,64 @@ class SoraClient:
                 # Parse error response
                 error_data = None
                 try:
-                    error_data = response.json()
-                except:
+                    if response_json:
+                        error_data = response_json
+                    else:
+                        error_data = response.json()
+                except Exception as err_err:
+                    err_err_str = str(err_err)
+                    if "IncompleteRead" in err_err_str:
+                        debug_logger.log_error(
+                            error_message=f"IncompleteRead occurred while parsing error response: {err_err_str}",
+                            status_code=response.status_code,
+                            response_text=err_err_str
+                        )
+                        raise Exception(f"IncompleteRead: {err_err_str}")
                     pass
 
-                # Check for unsupported_country_code error
+                # Check for 403 Forbidden or 429 Rate Limit - log for potential captcha solving
+                if (response.status_code == 403 or response.status_code == 429) and self.db:
+                    try:
+                        captcha_config = await self.db.get_captcha_config()
+                        if captcha_config.captcha_method == "yescaptcha" and captcha_config.yescaptcha_api_key:
+                            # Check if this is a Cloudflare challenge or rate limit that might need captcha
+                            is_cf_challenge = False
+                            is_rate_limit = False
+                            
+                            if error_data and isinstance(error_data, dict):
+                                error_info = error_data.get("error", {})
+                                error_code = error_info.get("code", "")
+                                error_msg = str(error_data).lower()
+                                
+                                # Check for Cloudflare challenge indicators
+                                if error_code == "cf_shield_429" or "cloudflare" in error_msg or "cf_" in error_code:
+                                    is_cf_challenge = True
+                                
+                                # Check for rate limit that might need captcha (not too_many_concurrent_tasks)
+                                if response.status_code == 429 and error_code != "too_many_concurrent_tasks":
+                                    is_rate_limit = True
+                            
+                            if is_cf_challenge or (response.status_code == 429 and is_rate_limit):
+                                debug_logger.log_info(f"{response.status_code} error detected on {url}, YesCaptcha is configured but site key extraction needed for full implementation")
+                                # Note: Full reCAPTCHA solving requires extracting site key from HTML response
+                                # This would require parsing the response body to find the reCAPTCHA site key
+                            elif response.status_code == 429:
+                                # too_many_concurrent_tasks - this is a business logic error, not a captcha issue
+                                debug_logger.log_info(f"429 error detected: {error_data.get('error', {}).get('code', 'unknown')} - This is a business logic error, not a captcha issue")
+                    except Exception as captcha_error:
+                        debug_logger.log_error(
+                            error_message=f"Captcha config check failed: {str(captcha_error)}",
+                            status_code=500,
+                            response_text=str(captcha_error)
+                        )
+
+                # Check for structured errors (unsupported_country_code, heavy_load, etc.)
                 if error_data and isinstance(error_data, dict):
                     error_info = error_data.get("error", {})
-                    if error_info.get("code") == "unsupported_country_code":
+                    error_code = error_info.get("code", "")
+                    
+                    # Check for unsupported_country_code error
+                    if error_code == "unsupported_country_code":
                         # Create structured error with full error data
                         import json
                         error_msg = json.dumps(error_data)
@@ -440,27 +577,61 @@ class SoraClient:
                         )
                         # Raise exception with structured error data
                         raise Exception(error_msg)
+                    
+                    # Check for heavy_load error - pass through as structured error
+                    if error_code == "heavy_load":
+                        import json
+                        error_msg = json.dumps(error_data)
+                        debug_logger.log_error(
+                            error_message=f"Heavy load detected: {error_msg}",
+                            status_code=response.status_code,
+                            response_text=error_msg
+                        )
+                        # Raise exception with structured error data for frontend retry
+                        raise Exception(error_msg)
 
                 # Generic error handling
-                error_msg = f"API request failed: {response.status_code} - {response.text}"
+                error_text = response_text if response_text else "Unknown error"
+                error_msg = f"API request failed: {response.status_code} - {error_text}"
                 debug_logger.log_error(
                     error_message=error_msg,
                     status_code=response.status_code,
-                    response_text=response.text
+                    response_text=error_text
                 )
                 raise Exception(error_msg)
 
-            return response_json if response_json else response.json()
+            # Return parsed JSON or try to parse again
+            if response_json:
+                return response_json
+            else:
+                try:
+                    return response.json()
+                except Exception as final_err:
+                    final_err_str = str(final_err)
+                    if "IncompleteRead" in final_err_str:
+                        debug_logger.log_error(
+                            error_message=f"IncompleteRead occurred while parsing final response: {final_err_str}",
+                            status_code=response.status_code,
+                            response_text=final_err_str
+                        )
+                        raise Exception(f"IncompleteRead: {final_err_str}")
+                    raise Exception(f"Failed to parse response: {final_err_str}")
     
     async def get_user_info(self, token: str) -> Dict[str, Any]:
         """Get user information"""
         return await self._make_request("GET", "/me", token)
     
-    async def upload_image(self, image_data: bytes, token: str, filename: str = "image.png") -> str:
+    async def upload_image(self, image_data: bytes, token: str, filename: str = "image.png", token_id: Optional[int] = None) -> str:
         """Upload image and return media_id
 
         使用 CurlMime 对象上传文件（curl_cffi 的正确方式）
         参考：https://curl-cffi.readthedocs.io/en/latest/quick_start.html#uploads
+        
+        Args:
+            image_data: Image data as bytes
+            token: Access token
+            filename: Image filename
+            token_id: Token ID for getting token-specific proxy (optional)
         """
         # 检测图片类型
         mime_type = "image/png"
@@ -486,8 +657,39 @@ class SoraClient:
             data=filename.encode('utf-8')
         )
 
-        result = await self._make_request("POST", "/uploads", token, multipart=mp)
-        return result["id"]
+        # Retry logic for TLS/OpenSSL errors (common on Windows)
+        max_retries = 5
+        retry_delay = 3  # Start with 3 seconds
+        
+        for attempt in range(max_retries):
+            try:
+                result = await self._make_request("POST", "/uploads", token, multipart=mp, token_id=token_id)
+                return result["id"]
+            except Exception as e:
+                error_msg = str(e)
+                is_tls_error = ("TLS" in error_msg or "curl" in error_msg or "OPENSSL" in error_msg or 
+                               "error:00000000" in error_msg or "invalid library" in error_msg)
+                
+                if is_tls_error and attempt < max_retries - 1:
+                    # Exponential backoff for TLS errors
+                    wait_time = retry_delay * (2 ** attempt)
+                    debug_logger.log_info(
+                        f"TLS/OpenSSL error during image upload (attempt {attempt + 1}/{max_retries}): {error_msg[:200]}. "
+                        f"Retrying in {wait_time}s..."
+                    )
+                    await asyncio.sleep(wait_time)
+                    continue
+                else:
+                    # Re-raise if not TLS error or last attempt
+                    debug_logger.log_error(
+                        error_message=f"Image upload failed: {error_msg}",
+                        status_code=500,
+                        response_text=error_msg
+                    )
+                    raise Exception(f"Failed to upload image: {error_msg}")
+        
+        # Should not reach here, but just in case
+        raise Exception("Image upload failed after all retries")
     
     async def generate_image(self, prompt: str, token: str, width: int = 360,
                             height: int = 360, media_id: Optional[str] = None, token_id: Optional[int] = None) -> str:
@@ -624,7 +826,7 @@ class SoraClient:
             kwargs = {
                 "headers": headers,
                 "timeout": self.timeout,
-                "impersonate": "chrome"
+                "impersonate": config.impersonate_browser
             }
 
             if proxy_url:
@@ -668,6 +870,279 @@ class SoraClient:
                 raise Exception(error_msg)
 
             return True
+
+    async def get_watermark_free_url_builtin(self, post_id: str, token: Optional[str] = None, token_id: Optional[int] = None) -> str:
+        """Get watermark-free video URL by parsing Sora share page directly (built-in, no external server needed)
+
+        Args:
+            post_id: Post ID to parse (e.g., s_690c0f574c3881918c3bc5b682a7e9fd)
+            token: Access token (optional, for authenticated requests)
+            token_id: Token ID for getting token-specific proxy (optional)
+
+        Returns:
+            Download link (watermark-free video URL)
+
+        Raises:
+            Exception: If parse fails
+        """
+        proxy_url = await self.proxy_manager.get_proxy_url(token_id)
+
+        # Construct the share URL
+        share_url = f"https://sora.chatgpt.com/p/{post_id}"
+
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.5",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Connection": "keep-alive",
+            "Upgrade-Insecure-Requests": "1"
+        }
+
+        # Add authorization if token provided
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+
+        kwargs = {
+            "headers": headers,
+            "timeout": 30,
+            "impersonate": "chrome"
+        }
+
+        if proxy_url:
+            kwargs["proxy"] = proxy_url
+
+        try:
+            async with AsyncSession() as session:
+                # Record start time
+                start_time = time.time()
+
+                # Make GET request to Sora share page
+                debug_logger.log_info(f"Fetching Sora share page: {share_url}")
+                response = await session.get(share_url, **kwargs)
+
+                # Calculate duration
+                duration_ms = (time.time() - start_time) * 1000
+
+                # Log response
+                debug_logger.log_response(
+                    status_code=response.status_code,
+                    headers=dict(response.headers),
+                    body=f"HTML content ({len(response.text) if response.text else 0} bytes)",
+                    duration_ms=duration_ms
+                )
+
+                # Check status
+                if response.status_code != 200:
+                    error_msg = f"Failed to fetch share page: {response.status_code} - {response.text[:500] if response.text else 'No content'}"
+                    debug_logger.log_error(
+                        error_message=error_msg,
+                        status_code=response.status_code,
+                        response_text=response.text[:1000] if response.text else "No content"
+                    )
+                    raise Exception(error_msg)
+
+                # Parse HTML to extract video URL
+                html_content = response.text
+                if not html_content:
+                    raise Exception("Empty response from share page")
+
+                # Try multiple patterns to find video URL
+                # Pattern 1: Look for video URLs in JSON data embedded in HTML
+                # Pattern 2: Look for direct video URLs in script tags
+                # Pattern 3: Look for video URLs in data attributes
+
+                download_link = None
+
+                # Pattern 1: Extract from __NEXT_DATA__ or similar JSON structures
+                json_data_pattern = r'<script[^>]*id="__NEXT_DATA__"[^>]*>(.*?)</script>'
+                json_match = re.search(json_data_pattern, html_content, re.DOTALL)
+                if json_match:
+                    try:
+                        import json
+                        json_data = json.loads(json_match.group(1))
+                        # Navigate through the JSON structure to find video URL
+                        # This structure may vary, so we try multiple paths
+                        def find_video_url(obj, path=""):
+                            if isinstance(obj, dict):
+                                for key, value in obj.items():
+                                    if key in ["url", "video_url", "download_url", "downloadable_url", "source_url"]:
+                                        if isinstance(value, str) and value.startswith("http"):
+                                            return value
+                                    if isinstance(value, (dict, list)):
+                                        result = find_video_url(value, f"{path}.{key}")
+                                        if result:
+                                            return result
+                            elif isinstance(obj, list):
+                                for i, item in enumerate(obj):
+                                    result = find_video_url(item, f"{path}[{i}]")
+                                    if result:
+                                        return result
+                            return None
+
+                        download_link = find_video_url(json_data)
+                    except Exception as json_err:
+                        debug_logger.log_info(f"Failed to parse JSON data: {str(json_err)}")
+
+                # Pattern 2: Look for video URLs in script tags with specific patterns
+                if not download_link:
+                    # Look for patterns like: "url":"https://..." or "video_url":"https://..."
+                    url_patterns = [
+                        r'"(?:url|video_url|download_url|downloadable_url|source_url)"\s*:\s*"([^"]+)"',
+                        r'<video[^>]+src=["\']([^"\']+)["\']',
+                        r'https?://[^"\s<>]+\.(?:mp4|mov|m4v|webm)(?:\?[^"\s<>]*)?'
+                    ]
+                    for pattern in url_patterns:
+                        matches = re.findall(pattern, html_content, re.IGNORECASE)
+                        for match in matches:
+                            if isinstance(match, tuple):
+                                match = match[0] if match else None
+                            if match and match.startswith("http") and "video" in match.lower():
+                                download_link = match
+                                break
+                        if download_link:
+                            break
+
+                # Pattern 3: Look for video URLs in data attributes or meta tags
+                if not download_link:
+                    meta_patterns = [
+                        r'<meta[^>]+property=["\']og:video["\'][^>]+content=["\']([^"\']+)["\']',
+                        r'<meta[^>]+name=["\']video:url["\'][^>]+content=["\']([^"\']+)["\']',
+                        r'data-video-url=["\']([^"\']+)["\']',
+                        r'data-url=["\']([^"\']+)["\']'
+                    ]
+                    for pattern in meta_patterns:
+                        match = re.search(pattern, html_content, re.IGNORECASE)
+                        if match:
+                            url = match.group(1) if isinstance(match.groups(), tuple) and match.groups() else match.group(0)
+                            if url and url.startswith("http"):
+                                download_link = url
+                                break
+
+                if not download_link:
+                    # Last resort: try to find any video URL in the HTML
+                    video_url_pattern = r'https?://[^"\s<>]+\.(?:mp4|mov|m4v|webm)(?:\?[^"\s<>]*)?'
+                    matches = re.findall(video_url_pattern, html_content, re.IGNORECASE)
+                    if matches:
+                        download_link = matches[0]
+
+                if not download_link:
+                    # Log HTML snippet for debugging
+                    html_snippet = html_content[:2000] if len(html_content) > 2000 else html_content
+                    debug_logger.log_error(
+                        error_message=f"Could not find video URL in share page HTML",
+                        status_code=404,
+                        response_text=html_snippet
+                    )
+                    raise Exception("Could not find video URL in share page. The page structure may have changed.")
+
+                debug_logger.log_info(f"Built-in parse successful: {download_link}")
+                return download_link
+
+        except Exception as e:
+            debug_logger.log_error(
+                error_message=f"Built-in parse request failed: {str(e)}",
+                status_code=500,
+                response_text=str(e)
+            )
+            raise
+
+    async def get_watermark_free_url_sora_downloader(self, parse_url: str, parse_token: str, post_id: str) -> str:
+        """Get watermark-free video URL from sora-downloader server (external server)
+
+        Args:
+            parse_url: sora-downloader server URL (e.g., http://localhost:5000)
+            parse_token: Access token for sora-downloader (APP_ACCESS_TOKEN, optional)
+            post_id: Post ID to parse (e.g., s_690c0f574c3881918c3bc5b682a7e9fd)
+
+        Returns:
+            Download link from sora-downloader server
+
+        Raises:
+            Exception: If parse fails or token is invalid
+        """
+        proxy_url = await self.proxy_manager.get_proxy_url()
+
+        # Construct the share URL
+        share_url = f"https://sora.chatgpt.com/p/{post_id}"
+
+        # Prepare request - sora-downloader uses root endpoint
+        json_data = {
+            "url": share_url
+        }
+
+        # Add token if provided (APP_ACCESS_TOKEN)
+        if parse_token:
+            json_data["token"] = parse_token
+
+        kwargs = {
+            "json": json_data,
+            "timeout": 30,
+            "impersonate": "chrome"
+        }
+
+        if proxy_url:
+            kwargs["proxy"] = proxy_url
+
+        try:
+            async with AsyncSession() as session:
+                # Record start time
+                start_time = time.time()
+
+                # Make POST request to sora-downloader (root endpoint)
+                # Remove trailing slash if present
+                base_url = parse_url.rstrip('/')
+                response = await session.post(base_url, **kwargs)
+
+                # Calculate duration
+                duration_ms = (time.time() - start_time) * 1000
+
+                # Log response
+                debug_logger.log_response(
+                    status_code=response.status_code,
+                    headers=dict(response.headers),
+                    body=response.text if response.text else "No content",
+                    duration_ms=duration_ms
+                )
+
+                # Check status
+                if response.status_code != 200:
+                    error_msg = f"Sora-downloader parse failed: {response.status_code} - {response.text}"
+                    debug_logger.log_error(
+                        error_message=error_msg,
+                        status_code=response.status_code,
+                        response_text=response.text
+                    )
+                    raise Exception(error_msg)
+
+                # Parse response
+                result = response.json()
+
+                # Check for error in response
+                if "error" in result:
+                    error_msg = f"Sora-downloader parse error: {result['error']}"
+                    debug_logger.log_error(
+                        error_message=error_msg,
+                        status_code=401,
+                        response_text=str(result)
+                    )
+                    raise Exception(error_msg)
+
+                # Extract download link - sora-downloader returns "download_link" or "url"
+                download_link = result.get("download_link") or result.get("url")
+                if not download_link:
+                    raise Exception("No download_link or url in sora-downloader response")
+
+                debug_logger.log_info(f"Sora-downloader parse successful: {download_link}")
+                return download_link
+
+        except Exception as e:
+            debug_logger.log_error(
+                error_message=f"Sora-downloader parse request failed: {str(e)}",
+                status_code=500,
+                response_text=str(e)
+            )
+            raise
 
     async def get_watermark_free_url_custom(self, parse_url: str, parse_token: str, post_id: str) -> str:
         """Get watermark-free video URL from custom parse server
@@ -869,12 +1344,13 @@ class SoraClient:
         await self._make_request("POST", f"/project_y/cameos/by_id/{cameo_id}/update_v2", token, json_data=json_data)
         return True
 
-    async def upload_character_image(self, image_data: bytes, token: str) -> str:
+    async def upload_character_image(self, image_data: bytes, token: str, token_id: Optional[int] = None) -> str:
         """Upload character image and return asset_pointer
 
         Args:
             image_data: Image file bytes
             token: Access token
+            token_id: Token ID for getting token-specific proxy (optional)
 
         Returns:
             asset_pointer
@@ -891,8 +1367,39 @@ class SoraClient:
             data=b"profile"
         )
 
-        result = await self._make_request("POST", "/project_y/file/upload", token, multipart=mp)
-        return result.get("asset_pointer")
+        # Retry logic for TLS/OpenSSL errors (common on Windows)
+        max_retries = 5
+        retry_delay = 3  # Start with 3 seconds
+        
+        for attempt in range(max_retries):
+            try:
+                result = await self._make_request("POST", "/project_y/file/upload", token, multipart=mp, token_id=token_id)
+                return result.get("asset_pointer")
+            except Exception as e:
+                error_msg = str(e)
+                is_tls_error = ("TLS" in error_msg or "curl" in error_msg or "OPENSSL" in error_msg or 
+                               "error:00000000" in error_msg or "invalid library" in error_msg)
+                
+                if is_tls_error and attempt < max_retries - 1:
+                    # Exponential backoff for TLS errors
+                    wait_time = retry_delay * (2 ** attempt)
+                    debug_logger.log_info(
+                        f"TLS/OpenSSL error during character image upload (attempt {attempt + 1}/{max_retries}): {error_msg[:200]}. "
+                        f"Retrying in {wait_time}s..."
+                    )
+                    await asyncio.sleep(wait_time)
+                    continue
+                else:
+                    # Re-raise if not TLS error or last attempt
+                    debug_logger.log_error(
+                        error_message=f"Character image upload failed: {error_msg}",
+                        status_code=500,
+                        response_text=error_msg
+                    )
+                    raise Exception(f"Failed to upload character image: {error_msg}")
+        
+        # Should not reach here, but just in case
+        raise Exception("Character image upload failed after all retries")
 
     async def delete_character(self, character_id: str, token: str) -> bool:
         """Delete a character
@@ -916,7 +1423,7 @@ class SoraClient:
             kwargs = {
                 "headers": headers,
                 "timeout": self.timeout,
-                "impersonate": "chrome"
+                "impersonate": config.impersonate_browser
             }
 
             if proxy_url:

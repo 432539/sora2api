@@ -4,7 +4,7 @@ import json
 from datetime import datetime
 from typing import Optional, List
 from pathlib import Path
-from .models import Token, TokenStats, Task, RequestLog, AdminConfig, ProxyConfig, WatermarkFreeConfig, CacheConfig, GenerationConfig, TokenRefreshConfig
+from .models import Token, TokenStats, Task, RequestLog, AdminConfig, ProxyConfig, WatermarkFreeConfig, CacheConfig, GenerationConfig, TokenRefreshConfig, CaptchaConfig
 
 class Database:
     """SQLite database manager"""
@@ -172,6 +172,28 @@ class Database:
                 VALUES (1, ?)
             """, (at_auto_refresh_enabled,))
 
+        # Ensure captcha_config has a row
+        cursor = await db.execute("SELECT COUNT(*) FROM captcha_config")
+        count = await cursor.fetchone()
+        if count[0] == 0:
+            # Get captcha config from config_dict if provided, otherwise use defaults
+            captcha_method = "yescaptcha"
+            yescaptcha_api_key = None
+            yescaptcha_api_url = "https://api.yescaptcha.com"
+
+            if config_dict:
+                captcha_config = config_dict.get("captcha", {})
+                captcha_method = captcha_config.get("captcha_method", "yescaptcha")
+                yescaptcha_api_key = captcha_config.get("yescaptcha_api_key", "")
+                yescaptcha_api_url = captcha_config.get("yescaptcha_api_url", "https://api.yescaptcha.com")
+                # Convert empty string to None
+                yescaptcha_api_key = yescaptcha_api_key if yescaptcha_api_key else None
+
+            await db.execute("""
+                INSERT INTO captcha_config (id, captcha_method, yescaptcha_api_key, yescaptcha_api_url)
+                VALUES (1, ?, ?, ?)
+            """, (captcha_method, yescaptcha_api_key, yescaptcha_api_url))
+
 
     async def check_and_migrate_db(self, config_dict: dict = None):
         """Check database integrity and perform migrations if needed
@@ -199,6 +221,7 @@ class Database:
                     ("client_id", "TEXT"),
                     ("proxy_url", "TEXT"),
                     ("is_expired", "BOOLEAN DEFAULT 0"),
+                    ("device_id", "TEXT"),
                 ]
 
                 for col_name, col_type in columns_to_add:
@@ -270,6 +293,20 @@ class Database:
                         except Exception as e:
                             print(f"  ✗ Failed to add column '{col_name}': {e}")
 
+            # Check if captcha_config table exists, if not create it
+            if not await self._table_exists(db, "captcha_config"):
+                await db.execute("""
+                    CREATE TABLE IF NOT EXISTS captcha_config (
+                        id INTEGER PRIMARY KEY DEFAULT 1,
+                        captcha_method TEXT DEFAULT 'yescaptcha',
+                        yescaptcha_api_key TEXT,
+                        yescaptcha_api_url TEXT DEFAULT 'https://api.yescaptcha.com',
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                print("  ✓ Created captcha_config table")
+
             # Ensure all config tables have their default rows
             # Pass config_dict if available to initialize from setting.toml
             await self._ensure_config_rows(db, config_dict)
@@ -312,7 +349,8 @@ class Database:
                     video_enabled BOOLEAN DEFAULT 1,
                     image_concurrency INTEGER DEFAULT -1,
                     video_concurrency INTEGER DEFAULT -1,
-                    is_expired BOOLEAN DEFAULT 0
+                    is_expired BOOLEAN DEFAULT 0,
+                    device_id TEXT
                 )
             """)
 
@@ -438,6 +476,18 @@ class Database:
                 )
             """)
 
+            # Captcha config table
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS captcha_config (
+                    id INTEGER PRIMARY KEY DEFAULT 1,
+                    captcha_method TEXT DEFAULT 'yescaptcha',
+                    yescaptcha_api_key TEXT,
+                    yescaptcha_api_url TEXT DEFAULT 'https://api.yescaptcha.com',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
             # Create indexes
             await db.execute("CREATE INDEX IF NOT EXISTS idx_task_id ON tasks(task_id)")
             await db.execute("CREATE INDEX IF NOT EXISTS idx_task_status ON tasks(status)")
@@ -482,8 +532,8 @@ class Database:
                 INSERT INTO tokens (token, email, username, name, st, rt, client_id, proxy_url, remark, expiry_time, is_active,
                                    plan_type, plan_title, subscription_end, sora2_supported, sora2_invite_code,
                                    sora2_redeemed_count, sora2_total_count, sora2_remaining_count, sora2_cooldown_until,
-                                   image_enabled, video_enabled, image_concurrency, video_concurrency)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                   image_enabled, video_enabled, image_concurrency, video_concurrency, device_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (token.token, token.email, "", token.name, token.st, token.rt, token.client_id, token.proxy_url,
                   token.remark, token.expiry_time, token.is_active,
                   token.plan_type, token.plan_title, token.subscription_end,
@@ -491,7 +541,7 @@ class Database:
                   token.sora2_redeemed_count, token.sora2_total_count,
                   token.sora2_remaining_count, token.sora2_cooldown_until,
                   token.image_enabled, token.video_enabled,
-                  token.image_concurrency, token.video_concurrency))
+                  token.image_concurrency, token.video_concurrency, token.device_id))
             await db.commit()
             token_id = cursor.lastrowid
 
@@ -645,8 +695,9 @@ class Database:
                           image_enabled: Optional[bool] = None,
                           video_enabled: Optional[bool] = None,
                           image_concurrency: Optional[int] = None,
-                          video_concurrency: Optional[int] = None):
-        """Update token (AT, ST, RT, client_id, proxy_url, remark, expiry_time, subscription info, image_enabled, video_enabled)"""
+                          video_concurrency: Optional[int] = None,
+                          device_id: Optional[str] = None):
+        """Update token (AT, ST, RT, client_id, proxy_url, remark, expiry_time, subscription info, image_enabled, video_enabled, device_id)"""
         async with aiosqlite.connect(self.db_path) as db:
             # Build dynamic update query
             updates = []
@@ -707,6 +758,10 @@ class Database:
             if video_concurrency is not None:
                 updates.append("video_concurrency = ?")
                 params.append(video_concurrency)
+
+            if device_id is not None:
+                updates.append("device_id = ?")
+                params.append(device_id)
 
             if updates:
                 params.append(token_id)
@@ -1116,6 +1171,53 @@ class Database:
                 SET image_timeout = ?, video_timeout = ?, updated_at = CURRENT_TIMESTAMP
                 WHERE id = 1
             """, (new_image_timeout, new_video_timeout))
+            await db.commit()
+
+    # Captcha config operations
+    async def get_captcha_config(self) -> CaptchaConfig:
+        """Get captcha configuration"""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute("SELECT * FROM captcha_config WHERE id = 1")
+            row = await cursor.fetchone()
+            if row:
+                return CaptchaConfig(**dict(row))
+            # If no row exists, return a default config
+            return CaptchaConfig(captcha_method="yescaptcha", yescaptcha_api_key=None, yescaptcha_api_url="https://api.yescaptcha.com")
+
+    async def update_captcha_config(self, captcha_method: str = None, yescaptcha_api_key: str = None, yescaptcha_api_url: str = None):
+        """Update captcha configuration"""
+        async with aiosqlite.connect(self.db_path) as db:
+            # Get current config first
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute("SELECT * FROM captcha_config WHERE id = 1")
+            row = await cursor.fetchone()
+
+            if row:
+                current = dict(row)
+                new_method = captcha_method if captcha_method is not None else current.get("captcha_method", "yescaptcha")
+                new_key = yescaptcha_api_key if yescaptcha_api_key is not None else current.get("yescaptcha_api_key")
+                new_url = yescaptcha_api_url if yescaptcha_api_url is not None else current.get("yescaptcha_api_url", "https://api.yescaptcha.com")
+            else:
+                new_method = captcha_method if captcha_method is not None else "yescaptcha"
+                new_key = yescaptcha_api_key
+                new_url = yescaptcha_api_url if yescaptcha_api_url is not None else "https://api.yescaptcha.com"
+
+            # Convert empty string to None
+            new_key = new_key if new_key else None
+
+            # Check if row exists, if not insert it
+            if not row:
+                await db.execute("""
+                    INSERT INTO captcha_config (id, captcha_method, yescaptcha_api_key, yescaptcha_api_url, created_at, updated_at)
+                    VALUES (1, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                """, (new_method, new_key, new_url))
+            else:
+                await db.execute("""
+                    UPDATE captcha_config
+                    SET captcha_method = ?, yescaptcha_api_key = ?, yescaptcha_api_url = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = 1
+                """, (new_method, new_key, new_url))
             await db.commit()
 
     # Token refresh config operations
